@@ -210,8 +210,8 @@ export class ProductionOrchestrator {
         settings: {
           voiceVolume: 1.0,  // 100% - full voice volume for clarity
           musicVolume: 0.15, // 15% - reduced music volume to be background only
-          fadeIn: 2,
-          fadeOut: 2,
+          fadeIn: 1.5,       // 1.5s smooth fade in at start
+          fadeOut: 2.5,      // 2.5s smooth fade out at end
           ducking: true,
           format: 'mp3',
         },
