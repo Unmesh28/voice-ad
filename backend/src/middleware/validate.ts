@@ -84,4 +84,30 @@ export const schemas = {
     productName: Joi.string().optional(),
     count: Joi.number().min(1).max(5).optional(),
   }),
+
+  generateTTS: Joi.object({
+    scriptId: Joi.string().uuid().required(),
+    voiceId: Joi.string().required(),
+    voiceSettings: Joi.object({
+      stability: Joi.number().min(0).max(1).optional(),
+      similarity_boost: Joi.number().min(0).max(1).optional(),
+      style: Joi.number().min(0).max(1).optional(),
+      use_speaker_boost: Joi.boolean().optional(),
+    }).optional(),
+  }),
+
+  generateTTSFromText: Joi.object({
+    text: Joi.string().min(1).max(5000).required(),
+    voiceId: Joi.string().required(),
+    voiceSettings: Joi.object({
+      stability: Joi.number().min(0).max(1).optional(),
+      similarity_boost: Joi.number().min(0).max(1).optional(),
+      style: Joi.number().min(0).max(1).optional(),
+      use_speaker_boost: Joi.boolean().optional(),
+    }).optional(),
+  }),
+
+  previewVoice: Joi.object({
+    text: Joi.string().min(1).max(500).optional(),
+  }),
 };

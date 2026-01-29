@@ -7,6 +7,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { connectDatabase } from './config/database';
 import apiRoutes from './routes';
 import createScriptGenerationWorker from './jobs/scriptGeneration.worker';
+import createTTSGenerationWorker from './jobs/ttsGeneration.worker';
 
 // Load environment variables
 dotenv.config();
@@ -22,6 +23,9 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Serve static files (audio uploads)
+app.use('/uploads', express.static('uploads'));
 
 // Request logging
 app.use((req, res, next) => {
@@ -60,6 +64,7 @@ const startServer = async () => {
 
     // Start queue workers
     createScriptGenerationWorker();
+    createTTSGenerationWorker();
 
     // Start Express server
     app.listen(PORT, () => {

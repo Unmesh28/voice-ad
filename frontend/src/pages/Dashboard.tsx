@@ -1,6 +1,6 @@
 import { Box, Typography, Grid, Paper, Button } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { Add, Mic, MusicNote, AutoAwesome } from '@mui/icons-material';
+import { Add, Mic, MusicNote, AutoAwesome, RecordVoiceOver } from '@mui/icons-material';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -19,6 +19,13 @@ const Dashboard = () => {
       icon: <AutoAwesome fontSize="large" />,
       path: '/script-generator',
       color: '#9c27b0',
+    },
+    {
+      title: 'TTS Generator',
+      description: 'Convert text to speech with AI voices',
+      icon: <RecordVoiceOver fontSize="large" />,
+      path: '/tts-generator',
+      color: '#ed6c02',
     },
     {
       title: 'New Production',
