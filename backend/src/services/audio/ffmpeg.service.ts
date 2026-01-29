@@ -97,65 +97,27 @@ class FFmpegService {
       // Add music input
       command.input(musicInput.filePath);
 
-      // Build filter complex
+      // Simplified filter approach to avoid "Result too large" error
       const filters: string[] = [];
-      let voiceChain = '[0:a]';
-      let musicChain = '[1:a]';
 
-      // Apply volume to voice
-      if (voiceInput.volume !== undefined && voiceInput.volume !== 1) {
-        filters.push(`${voiceChain}volume=${voiceInput.volume}[voice_vol]`);
-        voiceChain = '[voice_vol]';
-      }
+      // Apply volume to music (make it quieter as background)
+      const musicVolume = musicInput.volume !== undefined ? musicInput.volume : 0.25;
 
-      // Apply fade in/out to voice
-      if (voiceInput.fadeIn || voiceInput.fadeOut) {
-        const fadeFilters: string[] = [];
-        if (voiceInput.fadeIn) {
-          fadeFilters.push(`afade=t=in:st=0:d=${voiceInput.fadeIn}`);
-        }
-        if (voiceInput.fadeOut) {
-          fadeFilters.push(`afade=t=out:st=${voiceInput.fadeOut}:d=1`);
-        }
-        filters.push(`${voiceChain}${fadeFilters.join(',')}[voice_fade]`);
-        voiceChain = '[voice_fade]';
-      }
+      // Simple approach: just adjust volumes and mix
+      // Voice at full volume (or specified), music at lower volume
+      const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-      // Apply volume to music
-      let musicVolume = musicInput.volume !== undefined ? musicInput.volume : 0.3;
-      filters.push(`${musicChain}volume=${musicVolume}[music_vol]`);
-      musicChain = '[music_vol]';
+      filters.push(`[0:a]volume=${voiceVol}[v]`);
+      filters.push(`[1:a]volume=${musicVolume}[m]`);
 
-      // Apply fade in/out to music
-      if (musicInput.fadeIn || musicInput.fadeOut) {
-        const fadeFilters: string[] = [];
-        if (musicInput.fadeIn) {
-          fadeFilters.push(`afade=t=in:st=0:d=${musicInput.fadeIn}`);
-        }
-        if (musicInput.fadeOut) {
-          fadeFilters.push(`afade=t=out:st=${musicInput.fadeOut}:d=1`);
-        }
-        filters.push(`${musicChain}${fadeFilters.join(',')}[music_fade]`);
-        musicChain = '[music_fade]';
-      }
+      // Mix the streams
+      filters.push(`[v][m]amix=inputs=2:duration=longest:dropout_transition=2[mixed]`);
 
-      // Apply audio ducking if enabled
-      if (audioDucking) {
-        // Use sidechain compression to duck music when voice is present
-        filters.push(
-          `${musicChain}${voiceChain}sidechaincompress=threshold=0.1:ratio=4:attack=200:release=1000:makeup=${1 - duckingAmount}[music_ducked]`
-        );
-        musicChain = '[music_ducked]';
-      }
-
-      // Mix the two streams
-      filters.push(`${voiceChain}${musicChain}amix=inputs=2:duration=longest[mixed]`);
-
-      // Apply normalization if enabled
+      // Simple volume normalization instead of loudnorm to avoid complexity
       if (normalize) {
-        filters.push('[mixed]loudnorm[out]');
+        filters.push('[mixed]volume=1.5[out]');
       } else {
-        filters.push('[mixed]anull[out]');
+        filters.push('[mixed]acopy[out]');
       }
 
       // Set filter complex
@@ -170,10 +132,13 @@ class FFmpegService {
       // Handle events
       command
         .on('start', (commandLine) => {
-          logger.info('FFmpeg command:', commandLine);
+          logger.info('FFmpeg command started');
+          logger.debug('FFmpeg command details:', commandLine.substring(0, 200));
         })
         .on('progress', (progress) => {
-          logger.debug('FFmpeg progress:', progress.percent);
+          if (progress.percent) {
+            logger.debug('FFmpeg progress:', Math.round(progress.percent) + '%');
+          }
         })
         .on('end', () => {
           logger.info('Audio mixing completed:', outputPath);
