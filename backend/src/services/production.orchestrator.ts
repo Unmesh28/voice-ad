@@ -201,6 +201,7 @@ export class ProductionOrchestrator {
       // Stage 4: Mix Audio
       logger.info(`[Pipeline ${productionId}] Stage 4: Mixing audio`);
       const mixingJob = await audioMixingQueue.add('mix-audio', {
+        userId,
         productionId,
         scriptId: script.id,
         musicId: musicResult.musicId,
