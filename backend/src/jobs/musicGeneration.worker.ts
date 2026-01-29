@@ -111,7 +111,6 @@ const processMusicGeneration = async (job: Job<MusicGenerationJobData>) => {
     // Create a job record in database for tracking
     await prisma.job.create({
       data: {
-        id: job.id as string,
         type: 'MUSIC_GENERATION',
         payload: job.data as any,
         status: 'FAILED',

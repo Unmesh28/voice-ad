@@ -98,7 +98,6 @@ const processScriptGeneration = async (job: Job<ScriptGenerationJobData>) => {
     // Create a job record in database for tracking
     await prisma.job.create({
       data: {
-        id: job.id as string,
         type: 'SCRIPT_GENERATION',
         payload: job.data as any,
         status: 'FAILED',
