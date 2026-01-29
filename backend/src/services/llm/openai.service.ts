@@ -5,6 +5,7 @@ interface GenerateScriptParams {
   prompt: string;
   tone?: string;
   length?: 'short' | 'medium' | 'long';
+  durationSeconds?: number;
   targetAudience?: string;
   productName?: string;
   additionalContext?: string;
@@ -142,7 +143,14 @@ Format your output as a clean, ready-to-use script without extra commentary or s
       parts.push(`Target Audience: ${params.targetAudience}\n`);
     }
 
-    if (params.length) {
+    // Prioritize exact duration if provided
+    if (params.durationSeconds) {
+      const wordsPerSecond = 2.5; // Average speaking rate for ads
+      const targetWords = Math.round(params.durationSeconds * wordsPerSecond);
+      const wordRange = `${Math.round(targetWords * 0.9)}-${Math.round(targetWords * 1.1)}`;
+      parts.push(`Duration: EXACTLY ${params.durationSeconds} seconds (approximately ${wordRange} words)\n`);
+      parts.push(`CRITICAL: The script must be precisely ${params.durationSeconds} seconds when read at a natural pace. Do NOT exceed this duration.\n`);
+    } else if (params.length) {
       const lengthGuide = {
         short: '15-20 seconds (approximately 40-60 words)',
         medium: '30-40 seconds (approximately 80-120 words)',
