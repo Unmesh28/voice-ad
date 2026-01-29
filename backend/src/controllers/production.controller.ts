@@ -6,6 +6,7 @@ import { audioMixingQueue } from '../config/redis';
 import { logger } from '../config/logger';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import productionOrchestrator from '../services/production.orchestrator';
 
 /**
  * Create a new production
@@ -442,5 +443,54 @@ export const deleteProduction = asyncHandler(async (req: Request, res: Response)
   res.json({
     success: true,
     message: 'Production deleted successfully',
+  });
+});
+
+/**
+ * Create a quick production from a single prompt (One-click production)
+ * @route POST /api/productions/quick
+ */
+export const createQuickProduction = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) {
+    throw new AppError('User not authenticated', 401);
+  }
+
+  const { prompt, voiceId, duration, tone } = req.body;
+
+  if (!prompt) {
+    throw new AppError('Prompt is required', 400);
+  }
+
+  logger.info(`Creating quick production for user ${req.user.id}`);
+
+  const productionId = await productionOrchestrator.createQuickProduction({
+    userId: req.user.id,
+    prompt,
+    voiceId,
+    duration,
+    tone,
+  });
+
+  res.status(202).json({
+    success: true,
+    data: {
+      productionId,
+      message: 'Production pipeline started. Check progress using the progress endpoint.',
+    },
+  });
+});
+
+/**
+ * Get production progress for quick production
+ * @route GET /api/productions/:id/progress
+ */
+export const getProductionProgress = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  const progress = await productionOrchestrator.getProductionProgress(id);
+
+  res.json({
+    success: true,
+    data: progress,
   });
 });

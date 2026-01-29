@@ -19,4 +19,8 @@ router.delete('/:id', productionController.deleteProduction);
 router.post('/:id/mix', productionController.mixProduction);
 router.post('/:id/mix-sync', productionController.mixProductionSync);
 
+// Quick production (one-click)
+router.post('/quick', productionController.createQuickProduction);
+router.get('/:id/progress', productionController.getProductionProgress);
+
 export default router;

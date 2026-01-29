@@ -1,6 +1,7 @@
 import { Box, Typography, Grid, Paper, Button } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { Add, Mic, MusicNote, AutoAwesome, RecordVoiceOver } from '@mui/icons-material';
+import QuickProduction from '../components/QuickProduction';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -50,6 +51,13 @@ const Dashboard = () => {
       </Typography>
       <Typography variant="body1" color="text.secondary" paragraph>
         Welcome to VoiceAd - AI-powered audio production platform
+      </Typography>
+
+      {/* Quick Production - One-Click AI */}
+      <QuickProduction />
+
+      <Typography variant="h5" gutterBottom sx={{ mt: 4 }}>
+        Or use individual tools:
       </Typography>
 
       <Grid container spacing={3} sx={{ mt: 2 }}>
