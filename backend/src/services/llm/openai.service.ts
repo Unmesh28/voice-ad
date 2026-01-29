@@ -269,8 +269,8 @@ Format your output as a clean, ready-to-use script without extra commentary or s
       // Split variations
       const variations = generatedText
         .split('---VARIATION---')
-        .map((v) => v.trim())
-        .filter((v) => v.length > 0);
+        .map((v: string) => v.trim())
+        .filter((v: string) => v.length > 0);
 
       logger.info(`Generated ${variations.length} script variations`);
 
