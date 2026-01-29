@@ -129,13 +129,14 @@ export class ProductionOrchestrator {
         data: { scriptId: script.id },
       });
 
-      // Intelligent Voice Selection - analyze script and select best voice
+      // Intelligent Voice Selection - analyze user prompt first, then script
       logger.info(`[Pipeline ${productionId}] Analyzing script and selecting voice`);
       let selectedVoiceId = voiceId;
 
       if (voiceId === 'default' || !voiceId) {
         try {
-          const voiceMatch = await voiceSelectorService.selectVoiceForScript(script.content);
+          // Pass both user prompt and script for comprehensive voice selection
+          const voiceMatch = await voiceSelectorService.selectVoiceForScript(script.content, prompt);
           selectedVoiceId = voiceMatch.voiceId;
           logger.info(`[Pipeline ${productionId}] Intelligently selected voice: ${voiceMatch.name} (${voiceMatch.voiceId}) - ${voiceMatch.reason}`);
         } catch (error: any) {

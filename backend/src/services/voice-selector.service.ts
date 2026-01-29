@@ -11,6 +11,16 @@ interface ScriptAnalysis {
   emotion: string; // excited, calm, serious, playful, etc.
 }
 
+interface PromptVoicePreference {
+  hasPreference: boolean;
+  gender?: string;
+  ageRange?: string;
+  tone?: string;
+  accent?: string;
+  specificVoiceName?: string;
+  keywords: string[];
+}
+
 interface VoiceMatch {
   voiceId: string;
   name: string;
@@ -35,6 +45,92 @@ class VoiceSelectionService {
 
     if (!this.apiKey) {
       logger.warn('OpenAI API key not configured');
+    }
+  }
+
+  /**
+   * Analyze user prompt for explicit voice preferences
+   */
+  async analyzePromptForVoicePreferences(userPrompt: string): Promise<PromptVoicePreference> {
+    try {
+      logger.info('Analyzing user prompt for voice preferences');
+
+      const prompt = `Analyze this user prompt to extract any voice preferences they mentioned.
+
+User Prompt:
+${userPrompt}
+
+Look for:
+- Gender preferences (male, female, neutral, non-binary)
+- Age preferences (young, middle-aged, mature, elderly, child)
+- Tone preferences (professional, friendly, warm, authoritative, energetic, calm, etc.)
+- Accent preferences (American, British, Australian, etc.)
+- Specific voice characteristics (deep, high-pitched, raspy, smooth, etc.)
+- Any specific voice names mentioned
+
+Respond with a JSON object:
+{
+  "hasPreference": boolean,
+  "gender": "male/female/neutral or null",
+  "ageRange": "young/middle-aged/mature or null",
+  "tone": "tone description or null",
+  "accent": "accent preference or null",
+  "specificVoiceName": "specific name if mentioned or null",
+  "keywords": ["relevant", "keywords", "found"]
+}
+
+Respond ONLY with valid JSON, no additional text.`;
+
+      const messages: OpenAIMessage[] = [
+        {
+          role: 'system',
+          content: 'You are an expert at understanding user voice preferences from natural language. Respond only with valid JSON.',
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ];
+
+      const response = await axios.post(
+        this.apiUrl,
+        {
+          model: this.model,
+          messages,
+          temperature: 0.3,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 60000,
+        }
+      );
+
+      const content = response.data.choices[0].message.content || '{}';
+
+      // Extract JSON from response
+      let jsonStr = content.trim();
+      if (jsonStr.startsWith('```json')) {
+        jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/\n?```/g, '');
+      } else if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/```\n?/g, '').replace(/\n?```/g, '');
+      }
+
+      const preferences = JSON.parse(jsonStr);
+
+      logger.info('User prompt voice preferences:', preferences);
+
+      return preferences as PromptVoicePreference;
+    } catch (error: any) {
+      logger.error('Error analyzing prompt for voice preferences:', error.message);
+
+      // Return no preferences if analysis fails
+      return {
+        hasPreference: false,
+        keywords: [],
+      };
     }
   }
 
@@ -118,14 +214,20 @@ Respond ONLY with valid JSON, no additional text.`;
   }
 
   /**
-   * Select the best voice based on script analysis
+   * Select the best voice based on script analysis and optional user prompt preferences
    */
-  async selectVoiceForScript(scriptContent: string): Promise<VoiceMatch> {
+  async selectVoiceForScript(scriptContent: string, userPrompt?: string): Promise<VoiceMatch> {
     try {
-      // Step 1: Analyze the script
+      // Step 1: Analyze user prompt for explicit voice preferences (if provided)
+      let promptPreferences: PromptVoicePreference | null = null;
+      if (userPrompt) {
+        promptPreferences = await this.analyzePromptForVoicePreferences(userPrompt);
+      }
+
+      // Step 2: Analyze the script
       const analysis = await this.analyzeScript(scriptContent);
 
-      // Step 2: Get available voices from ElevenLabs
+      // Step 3: Get available voices from ElevenLabs
       const voices = await elevenLabsService.getVoices();
 
       if (!voices || voices.length === 0) {
@@ -134,34 +236,89 @@ Respond ONLY with valid JSON, no additional text.`;
 
       logger.info(`Found ${voices.length} available voices, matching with analysis`);
 
-      // Step 3: Score and rank voices based on analysis
+      // Step 4: Score and rank voices based on both prompt preferences and script analysis
       const scoredVoices = voices.map((voice) => {
         let score = 0;
         const reasons: string[] = [];
 
-        // Check voice labels for matching characteristics
+        // PRIORITY 1: Match user's explicit voice preferences from prompt (if any)
+        if (promptPreferences?.hasPreference) {
+          if (voice.labels) {
+            const labels = voice.labels;
+
+            // Match gender (highest priority if specified)
+            if (promptPreferences.gender &&
+                labels.gender?.toLowerCase().includes(promptPreferences.gender.toLowerCase())) {
+              score += 50;
+              reasons.push(`user requested ${promptPreferences.gender}`);
+            }
+
+            // Match age preference
+            if (promptPreferences.ageRange &&
+                labels.age?.toLowerCase().includes(promptPreferences.ageRange.toLowerCase())) {
+              score += 40;
+              reasons.push(`user requested ${promptPreferences.ageRange}`);
+            }
+
+            // Match accent preference
+            if (promptPreferences.accent &&
+                labels.accent?.toLowerCase().includes(promptPreferences.accent.toLowerCase())) {
+              score += 35;
+              reasons.push(`user requested ${promptPreferences.accent} accent`);
+            }
+
+            // Match tone preference
+            if (promptPreferences.tone &&
+                labels.descriptive?.toLowerCase().includes(promptPreferences.tone.toLowerCase())) {
+              score += 30;
+              reasons.push(`user requested ${promptPreferences.tone} tone`);
+            }
+          }
+
+          // Check for specific voice name match
+          if (promptPreferences.specificVoiceName) {
+            if (voice.name.toLowerCase().includes(promptPreferences.specificVoiceName.toLowerCase())) {
+              score += 100; // Very high score for exact name match
+              reasons.push(`matches requested voice name`);
+            }
+          }
+
+          // Check for keyword matches in voice description
+          promptPreferences.keywords.forEach((keyword) => {
+            const voiceText = `${voice.name} ${voice.description || ''}`.toLowerCase();
+            if (voiceText.includes(keyword.toLowerCase())) {
+              score += 15;
+              reasons.push(`matches keyword: ${keyword}`);
+            }
+          });
+        }
+
+        // PRIORITY 2: Match script analysis (lower weight than explicit preferences)
+        // Only apply script-based scoring if not overridden by user preferences
         if (voice.labels) {
           const labels = voice.labels;
 
-          // Match gender
-          if (labels.gender?.toLowerCase().includes(analysis.gender.toLowerCase())) {
-            score += 30;
-            reasons.push(`gender: ${labels.gender}`);
+          // Match gender (only if user didn't specify)
+          if (!promptPreferences?.gender &&
+              labels.gender?.toLowerCase().includes(analysis.gender.toLowerCase())) {
+            score += 25;
+            reasons.push(`script suggests ${labels.gender}`);
           }
 
-          // Match age
-          if (labels.age?.toLowerCase().includes(analysis.ageRange.toLowerCase())) {
+          // Match age (only if user didn't specify)
+          if (!promptPreferences?.ageRange &&
+              labels.age?.toLowerCase().includes(analysis.ageRange.toLowerCase())) {
             score += 20;
-            reasons.push(`age: ${labels.age}`);
+            reasons.push(`script suggests ${labels.age}`);
           }
 
           // Match accent (prefer neutral/american for professional)
-          if (labels.accent) {
+          if (!promptPreferences?.accent && labels.accent) {
             if (analysis.tone === 'professional' &&
                 (labels.accent.toLowerCase().includes('american') ||
                  labels.accent.toLowerCase().includes('neutral'))) {
               score += 15;
-              reasons.push(`accent: ${labels.accent}`);
+              reasons.push(`professional ${labels.accent} accent`);
             }
           }
 
@@ -171,17 +328,17 @@ Respond ONLY with valid JSON, no additional text.`;
                 labels.use_case.toLowerCase().includes('commercial') ||
                 labels.use_case.toLowerCase().includes('advertisement')) {
               score += 25;
-              reasons.push(`use case: ${labels.use_case}`);
+              reasons.push(`${labels.use_case} voice`);
             }
           }
 
-          // Match descriptive tags
-          if (labels.descriptive) {
+          // Match descriptive tags (only if user didn't specify tone)
+          if (!promptPreferences?.tone && labels.descriptive) {
             const descriptive = labels.descriptive.toLowerCase();
             if (descriptive.includes(analysis.tone.toLowerCase()) ||
                 descriptive.includes(analysis.emotion.toLowerCase())) {
               score += 20;
-              reasons.push(`descriptive: ${labels.descriptive}`);
+              reasons.push(`${analysis.tone} tone`);
             }
           }
         }
