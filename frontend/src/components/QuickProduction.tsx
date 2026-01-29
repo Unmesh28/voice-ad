@@ -213,7 +213,18 @@ const QuickProduction = () => {
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
               <FormControl fullWidth>
-                <InputLabel>Tone</InputLabel>
+                <InputLabel
+                  sx={{
+                    bgcolor: 'rgba(255, 255, 255, 0.95)',
+                    px: 1,
+                    borderRadius: 1,
+                    '&.Mui-focused': {
+                      bgcolor: 'white',
+                    },
+                  }}
+                >
+                  Tone
+                </InputLabel>
                 <Select
                   value={tone}
                   label="Tone"
@@ -221,22 +232,62 @@ const QuickProduction = () => {
                   sx={{
                     bgcolor: 'white',
                     borderRadius: 2,
+                    fontWeight: 500,
                     transition: 'all 0.3s ease',
                     '&:hover': {
                       boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                     },
+                    '& .MuiSelect-select': {
+                      py: 1.5,
+                    },
                   }}
                 >
-                  <MenuItem value="professional">Professional</MenuItem>
-                  <MenuItem value="friendly">Friendly</MenuItem>
-                  <MenuItem value="energetic">Energetic</MenuItem>
-                  <MenuItem value="calm">Calm</MenuItem>
-                  <MenuItem value="exciting">Exciting</MenuItem>
+                  <MenuItem value="professional">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#667eea' }} />
+                      Professional
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value="friendly">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#10b981' }} />
+                      Friendly
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value="energetic">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#f59e0b' }} />
+                      Energetic
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value="calm">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#3b82f6' }} />
+                      Calm
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value="exciting">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#ef4444' }} />
+                      Exciting
+                    </Box>
+                  </MenuItem>
                 </Select>
               </FormControl>
 
               <FormControl fullWidth>
-                <InputLabel>Duration</InputLabel>
+                <InputLabel
+                  sx={{
+                    bgcolor: 'rgba(255, 255, 255, 0.95)',
+                    px: 1,
+                    borderRadius: 1,
+                    '&.Mui-focused': {
+                      bgcolor: 'white',
+                    },
+                  }}
+                >
+                  Duration
+                </InputLabel>
                 <Select
                   value={duration}
                   label="Duration"
@@ -244,15 +295,34 @@ const QuickProduction = () => {
                   sx={{
                     bgcolor: 'white',
                     borderRadius: 2,
+                    fontWeight: 500,
                     transition: 'all 0.3s ease',
                     '&:hover': {
                       boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                     },
+                    '& .MuiSelect-select': {
+                      py: 1.5,
+                    },
                   }}
                 >
-                  <MenuItem value={15}>15 seconds</MenuItem>
-                  <MenuItem value={30}>30 seconds</MenuItem>
-                  <MenuItem value={60}>60 seconds</MenuItem>
+                  <MenuItem value={15}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#10b981' }} />
+                      15 seconds
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value={30}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#667eea' }} />
+                      30 seconds
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value={60}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#f59e0b' }} />
+                      60 seconds
+                    </Box>
+                  </MenuItem>
                 </Select>
               </FormControl>
             </Stack>
