@@ -118,8 +118,8 @@ class FFmpegService {
         filters.push(`[v][m]amix=inputs=2:duration=longest:dropout_transition=2[mixed]`);
 
         // Apply fade in/out to the mixed audio for smooth transitions
-        const fadeIn = voiceInput.fadeIn || 1.5; // Default 1.5 second fade in for smooth start
-        const fadeOut = voiceInput.fadeOut || 2.5; // Default 2.5 second fade out for smooth ending
+        const fadeIn = voiceInput.fadeIn || 0.1; // Default 100ms fade in for smooth start
+        const fadeOut = voiceInput.fadeOut || 0.1; // Default 100ms fade out for smooth ending
 
         // Calculate fade out start time (duration - fadeOut seconds)
         const fadeOutStart = Math.max(0, voiceDuration - fadeOut);
@@ -203,11 +203,11 @@ class FFmpegService {
         }
 
         // Apply fade in at start
-        const fadeIn = input.fadeIn || 1.5;
+        const fadeIn = input.fadeIn || 0.1;
         filters.push(`afade=t=in:st=0:d=${fadeIn}`);
 
         // Apply fade out at end
-        const fadeOut = input.fadeOut || 2.5;
+        const fadeOut = input.fadeOut || 0.1;
         const fadeOutStart = Math.max(0, audioDuration - fadeOut);
         filters.push(`afade=t=out:st=${fadeOutStart}:d=${fadeOut}`);
 
