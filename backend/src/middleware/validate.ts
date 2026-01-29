@@ -110,4 +110,27 @@ export const schemas = {
   previewVoice: Joi.object({
     text: Joi.string().min(1).max(500).optional(),
   }),
+
+  generateMusic: Joi.object({
+    text: Joi.string().min(10).max(500).required(),
+    duration_seconds: Joi.number().min(0.5).max(22).optional(),
+    prompt_influence: Joi.number().min(0).max(1).optional(),
+    name: Joi.string().max(255).optional(),
+    genre: Joi.string().max(100).optional(),
+    mood: Joi.string().max(100).optional(),
+  }),
+
+  uploadMusicTrack: Joi.object({
+    name: Joi.string().min(1).max(255).required(),
+    description: Joi.string().max(1000).optional(),
+    genre: Joi.string().max(100).optional(),
+    mood: Joi.string().max(100).optional(),
+  }),
+
+  generateMusicPrompt: Joi.object({
+    genre: Joi.string().optional(),
+    mood: Joi.string().optional(),
+    tempo: Joi.string().optional(),
+    instruments: Joi.string().optional(),
+  }),
 };

@@ -28,6 +28,13 @@ const Dashboard = () => {
       color: '#ed6c02',
     },
     {
+      title: 'Music Generator',
+      description: 'Generate background music with AI',
+      icon: <MusicNote fontSize="large" />,
+      path: '/music-generator',
+      color: '#f57c00',
+    },
+    {
       title: 'New Production',
       description: 'Create a new audio production',
       icon: <Mic fontSize="large" />,

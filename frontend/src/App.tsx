@@ -8,6 +8,7 @@ import Projects from './pages/Projects';
 import ScriptGenerator from './pages/ScriptGenerator';
 import Production from './pages/Production';
 import TTSGenerator from './pages/TTSGenerator';
+import MusicGenerator from './pages/MusicGenerator';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -32,6 +33,7 @@ function App() {
           <Route path="projects" element={<Projects />} />
           <Route path="script-generator" element={<ScriptGenerator />} />
           <Route path="tts-generator" element={<TTSGenerator />} />
+          <Route path="music-generator" element={<MusicGenerator />} />
           <Route path="production/:id?" element={<Production />} />
         </Route>
 
