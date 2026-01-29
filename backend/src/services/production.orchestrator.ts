@@ -98,8 +98,7 @@ export class ProductionOrchestrator {
         variations: 1,
       });
 
-      await scriptJob.waitUntilFinished(scriptGenerationQueue.events);
-      const scriptResult = await scriptJob.returnvalue;
+      const scriptResult = await scriptJob.waitUntilFinished();
 
       if (!scriptResult?.scriptId) {
         throw new Error('Script generation failed - no script ID returned');
@@ -132,7 +131,7 @@ export class ProductionOrchestrator {
         },
       });
 
-      await ttsJob.waitUntilFinished(ttsGenerationQueue.events);
+      await ttsJob.waitUntilFinished();
       await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 50, 'Speech generated! Creating background music...');
 
       // Stage 3: Generate Music
@@ -144,8 +143,7 @@ export class ProductionOrchestrator {
         mood: tone,
       });
 
-      await musicJob.waitUntilFinished(musicGenerationQueue.events);
-      const musicResult = await musicJob.returnvalue;
+      const musicResult = await musicJob.waitUntilFinished();
 
       if (!musicResult?.musicId) {
         throw new Error('Music generation failed - no music ID returned');
@@ -176,8 +174,7 @@ export class ProductionOrchestrator {
         },
       });
 
-      await mixingJob.waitUntilFinished(audioMixingQueue.events);
-      const mixingResult = await mixingJob.returnvalue;
+      const mixingResult = await mixingJob.waitUntilFinished();
 
       if (!mixingResult?.outputUrl) {
         throw new Error('Audio mixing failed - no output URL returned');
