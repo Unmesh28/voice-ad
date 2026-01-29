@@ -60,5 +60,28 @@ export const schemas = {
     tone: Joi.string().optional(),
     length: Joi.string().valid('short', 'medium', 'long').optional(),
     targetAudience: Joi.string().optional(),
+    productName: Joi.string().optional(),
+    additionalContext: Joi.string().max(1000).optional(),
+    title: Joi.string().max(255).optional(),
+  }),
+
+  updateScript: Joi.object({
+    title: Joi.string().min(1).max(255).optional(),
+    content: Joi.string().optional(),
+    metadata: Joi.object().optional(),
+  }),
+
+  refineScript: Joi.object({
+    improvementRequest: Joi.string().min(10).max(1000).required(),
+  }),
+
+  generateVariations: Joi.object({
+    projectId: Joi.string().uuid().required(),
+    prompt: Joi.string().min(10).max(2000).required(),
+    tone: Joi.string().optional(),
+    length: Joi.string().valid('short', 'medium', 'long').optional(),
+    targetAudience: Joi.string().optional(),
+    productName: Joi.string().optional(),
+    count: Joi.number().min(1).max(5).optional(),
   }),
 };

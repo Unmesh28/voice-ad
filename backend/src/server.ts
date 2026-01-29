@@ -4,7 +4,9 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { logger } from './config/logger';
 import { errorHandler } from './middleware/errorHandler';
+import { connectDatabase } from './config/database';
 import apiRoutes from './routes';
+import createScriptGenerationWorker from './jobs/scriptGeneration.worker';
 
 // Load environment variables
 dotenv.config();
@@ -51,10 +53,26 @@ app.use((req: Request, res: Response) => {
 app.use(errorHandler);
 
 // Start server
-app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
-  logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+const startServer = async () => {
+  try {
+    // Connect to database
+    await connectDatabase();
+
+    // Start queue workers
+    createScriptGenerationWorker();
+
+    // Start Express server
+    app.listen(PORT, () => {
+      logger.info(`Server running on port ${PORT}`);
+      logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+  } catch (error) {
+    logger.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 // Handle unhandled rejections
 process.on('unhandledRejection', (err: Error) => {

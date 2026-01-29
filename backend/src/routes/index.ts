@@ -1,12 +1,16 @@
 import { Router } from 'express';
 import authRoutes from './auth.routes';
 import userRoutes from './user.routes';
+import projectRoutes from './project.routes';
+import scriptRoutes from './script.routes';
 
 const router = Router();
 
 // Mount routes
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
+router.use('/projects', projectRoutes);
+router.use('/scripts', scriptRoutes);
 
 // Health check for API
 router.get('/health', (req, res) => {
