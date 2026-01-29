@@ -11,6 +11,7 @@ interface ScriptGenerationJobData {
   prompt: string;
   tone?: string;
   length?: 'short' | 'medium' | 'long';
+  durationSeconds?: number;
   targetAudience?: string;
   productName?: string;
   additionalContext?: string;
@@ -20,7 +21,7 @@ interface ScriptGenerationJobData {
  * Process script generation jobs
  */
 const processScriptGeneration = async (job: Job<ScriptGenerationJobData>) => {
-  const { userId, projectId, prompt, tone, length, targetAudience, productName, additionalContext } =
+  const { userId, projectId, prompt, tone, length, durationSeconds, targetAudience, productName, additionalContext } =
     job.data;
 
   logger.info(`Processing script generation job ${job.id}`, {
@@ -37,6 +38,7 @@ const processScriptGeneration = async (job: Job<ScriptGenerationJobData>) => {
       prompt,
       tone,
       length,
+      durationSeconds,
       targetAudience,
       productName,
       additionalContext,

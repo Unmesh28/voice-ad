@@ -104,6 +104,7 @@ export class ProductionOrchestrator {
         projectId,
         prompt: `Create a ${duration}-second ${tone} advertisement script for: ${prompt}`,
         tone,
+        durationSeconds: duration,
         length: duration <= 15 ? 'short' : duration <= 30 ? 'medium' : 'long',
         variations: 1,
       });
