@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { randomBytes } from 'crypto';
 import prisma from '../config/database';
 import { hashPassword, comparePassword } from '../utils/password';
 import { generateToken, generateRefreshToken, verifyRefreshToken } from '../utils/jwt';
@@ -20,6 +21,9 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   // Hash password
   const passwordHash = await hashPassword(password);
 
+  // Generate unique API key
+  const apiKey = `vad_${randomBytes(32).toString('hex')}`;
+
   // Create user
   const user = await prisma.user.create({
     data: {
@@ -27,6 +31,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
       passwordHash,
       firstName,
       lastName,
+      apiKey,
     },
   });
 
