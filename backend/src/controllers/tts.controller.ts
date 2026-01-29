@@ -152,13 +152,13 @@ export const generateTTSSync = asyncHandler(async (req: Request, res: Response) 
         ...(script.metadata as object),
         lastTTS: {
           voiceId,
-          voiceSettings: settings,
+          voiceSettings: settings as any,
           audioUrl,
           characterCount,
           estimatedDuration,
           generatedAt: new Date().toISOString(),
         },
-      },
+      } as any,
     },
   });
 
