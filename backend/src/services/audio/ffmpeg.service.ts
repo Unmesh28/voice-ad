@@ -140,42 +140,42 @@ class FFmpegService {
         } else {
           filters.push('[faded]acopy[out]');
         }
+
+        // Set filter complex
+        command.complexFilter(filters.join(';'), 'out');
+
+        // Set output options
+        this.setOutputOptions(command, outputFormat);
+
+        // Set output path
+        command.output(outputPath);
+
+        // Handle events
+        command
+          .on('start', (commandLine: string) => {
+            logger.info('FFmpeg command started');
+            logger.debug('FFmpeg command details:', commandLine.substring(0, 200));
+          })
+          .on('progress', (progress: any) => {
+            if (progress.percent) {
+              logger.debug('FFmpeg progress:', Math.round(progress.percent) + '%');
+            }
+          })
+          .on('end', () => {
+            logger.info('Audio mixing completed:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: Error) => {
+            logger.error('FFmpeg error:', err.message);
+            reject(new Error(`FFmpeg processing failed: ${err.message}`));
+          });
+
+        // Run the command
+        command.run();
       } catch (error: any) {
         reject(error);
         return;
       }
-
-      // Set filter complex
-      command.complexFilter(filters.join(';'), 'out');
-
-      // Set output options
-      this.setOutputOptions(command, outputFormat);
-
-      // Set output path
-      command.output(outputPath);
-
-      // Handle events
-      command
-        .on('start', (commandLine) => {
-          logger.info('FFmpeg command started');
-          logger.debug('FFmpeg command details:', commandLine.substring(0, 200));
-        })
-        .on('progress', (progress) => {
-          if (progress.percent) {
-            logger.debug('FFmpeg progress:', Math.round(progress.percent) + '%');
-          }
-        })
-        .on('end', () => {
-          logger.info('Audio mixing completed:', outputPath);
-          resolve(outputPath);
-        })
-        .on('error', (err) => {
-          logger.error('FFmpeg error:', err.message);
-          reject(new Error(`FFmpeg processing failed: ${err.message}`));
-        });
-
-      // Run the command
-      command.run();
     });
   }
 
@@ -216,35 +216,35 @@ class FFmpegService {
           fadeOut: `${fadeOut}s`,
           duration: `${audioDuration}s`,
         });
+
+        // Apply filters if any
+        if (filters.length > 0) {
+          command.audioFilters(filters);
+        }
+
+        // Set output options
+        this.setOutputOptions(command, outputFormat);
+
+        // Set output
+        command.output(outputPath);
+
+        // Handle events
+        command
+          .on('end', () => {
+            logger.info('Audio processing completed:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: Error) => {
+            logger.error('FFmpeg error:', err.message);
+            reject(new Error(`FFmpeg processing failed: ${err.message}`));
+          });
+
+        // Run
+        command.run();
       } catch (error: any) {
         reject(error);
         return;
       }
-
-      // Apply filters if any
-      if (filters.length > 0) {
-        command.audioFilters(filters);
-      }
-
-      // Set output options
-      this.setOutputOptions(command, outputFormat);
-
-      // Set output
-      command.output(outputPath);
-
-      // Handle events
-      command
-        .on('end', () => {
-          logger.info('Audio processing completed:', outputPath);
-          resolve(outputPath);
-        })
-        .on('error', (err) => {
-          logger.error('FFmpeg error:', err.message);
-          reject(new Error(`FFmpeg processing failed: ${err.message}`));
-        });
-
-      // Run
-      command.run();
     });
   }
 
