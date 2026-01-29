@@ -9,6 +9,7 @@ import {
 import { QueueEvents } from 'bullmq';
 import redisConnection from '../config/redis';
 import { logger } from '../config/logger';
+import voiceSelectorService from './voice-selector.service';
 
 interface QuickProductionInput {
   userId: string;
@@ -119,7 +120,7 @@ export class ProductionOrchestrator {
       }
 
       logger.info(`[Pipeline ${productionId}] Script generated: ${script.id}`);
-      await this.updateProductionStatus(productionId, 'GENERATING_VOICE', 30, 'Script generated! Generating speech...');
+      await this.updateProductionStatus(productionId, 'GENERATING_VOICE', 25, 'Script generated! Selecting perfect voice...');
 
       // Update production with script ID
       await prisma.production.update({
@@ -127,11 +128,28 @@ export class ProductionOrchestrator {
         data: { scriptId: script.id },
       });
 
+      // Intelligent Voice Selection - analyze script and select best voice
+      logger.info(`[Pipeline ${productionId}] Analyzing script and selecting voice`);
+      let selectedVoiceId = voiceId;
+
+      if (voiceId === 'default' || !voiceId) {
+        try {
+          const voiceMatch = await voiceSelectorService.selectVoiceForScript(script.content);
+          selectedVoiceId = voiceMatch.voiceId;
+          logger.info(`[Pipeline ${productionId}] Intelligently selected voice: ${voiceMatch.name} (${voiceMatch.voiceId}) - ${voiceMatch.reason}`);
+        } catch (error: any) {
+          logger.warn(`[Pipeline ${productionId}] Voice selection failed, using first available voice:`, error.message);
+          // If voice selection fails, we'll let the TTS service handle it
+        }
+      }
+
+      await this.updateProductionStatus(productionId, 'GENERATING_VOICE', 30, 'Voice selected! Generating speech...');
+
       // Stage 2: Generate TTS (Voice)
-      logger.info(`[Pipeline ${productionId}] Stage 2: Generating TTS`);
+      logger.info(`[Pipeline ${productionId}] Stage 2: Generating TTS with voice ${selectedVoiceId}`);
       const ttsJob = await ttsGenerationQueue.add('generate-tts', {
         scriptId: script.id,
-        voiceId,
+        voiceId: selectedVoiceId,
         settings: {
           stability: 0.75,
           similarityBoost: 0.75,
@@ -143,11 +161,23 @@ export class ProductionOrchestrator {
       await ttsJob.waitUntilFinished(ttsQueueEvents);
       await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 50, 'Speech generated! Creating background music...');
 
-      // Stage 3: Generate Music
-      logger.info(`[Pipeline ${productionId}] Stage 3: Generating music`);
+      // Stage 3: Generate Music - intelligently based on script
+      logger.info(`[Pipeline ${productionId}] Stage 3: Generating music based on script analysis`);
+
+      // Generate intelligent music prompt based on script
+      let musicPrompt = `${tone} background music for advertisement`;
+      try {
+        musicPrompt = await voiceSelectorService.generateMusicPrompt(script.content, duration);
+        logger.info(`[Pipeline ${productionId}] Generated music prompt: ${musicPrompt}`);
+      } catch (error: any) {
+        logger.warn(`[Pipeline ${productionId}] Music prompt generation failed, using default:`, error.message);
+      }
+
       const musicJob = await musicGenerationQueue.add('generate-music', {
-        prompt: `${tone} background music for advertisement`,
-        duration,
+        userId,
+        text: musicPrompt,
+        duration_seconds: Math.min(duration, 22), // ElevenLabs max is 22 seconds
+        prompt_influence: 0.3,
         genre: 'corporate',
         mood: tone,
       });
