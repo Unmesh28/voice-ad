@@ -72,7 +72,7 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     // Get settings
     const settings = (production.settings as any) || {};
     const voiceVolume = settings.voiceVolume !== undefined ? settings.voiceVolume : 1.0;
-    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.3;
+    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.15; // Reduced from 0.3 to 0.15
     const fadeIn = settings.fadeIn || 0;
     const fadeOut = settings.fadeOut || 0;
     const audioDucking = settings.audioDucking !== false;
@@ -91,6 +91,29 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
 
     await job.updateProgress(30);
 
+    // Extend music to match voice duration if needed
+    let finalMusicPath = musicPath;
+    if (voicePath && musicPath) {
+      logger.info('Checking if music needs to be extended to match voice duration');
+
+      const voiceDuration = await ffmpegService.getAudioDuration(voicePath);
+      const musicDuration = await ffmpegService.getAudioDuration(musicPath);
+
+      logger.info(`Voice duration: ${voiceDuration}s, Music duration: ${musicDuration}s`);
+
+      if (musicDuration < voiceDuration) {
+        // Extend music to match voice duration
+        const extendedFilename = `extended_music_${uuidv4()}.mp3`;
+        const extendedMusicPath = path.join(uploadDir, 'music', extendedFilename);
+
+        logger.info(`Extending music from ${musicDuration}s to ${voiceDuration}s`);
+        await ffmpegService.extendAudioDuration(musicPath, voiceDuration, extendedMusicPath);
+        finalMusicPath = extendedMusicPath;
+
+        await job.updateProgress(50);
+      }
+    }
+
     // Mix audio
     logger.info(`Mixing audio for production ${productionId}`);
     await ffmpegService.mixAudio({
@@ -100,8 +123,8 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
         fadeIn,
         fadeOut,
       } : undefined,
-      musicInput: musicPath ? {
-        filePath: musicPath,
+      musicInput: finalMusicPath ? {
+        filePath: finalMusicPath,
         volume: musicVolume,
         fadeIn,
         fadeOut,

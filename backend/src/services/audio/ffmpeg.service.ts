@@ -100,8 +100,8 @@ class FFmpegService {
       // Simplified filter approach to avoid "Result too large" error
       const filters: string[] = [];
 
-      // Apply volume to music (make it quieter as background)
-      const musicVolume = musicInput.volume !== undefined ? musicInput.volume : 0.25;
+      // Apply volume to music (make it quieter as background for clarity)
+      const musicVolume = musicInput.volume !== undefined ? musicInput.volume : 0.15;
 
       // Simple approach: just adjust volumes and mix
       // Voice at full volume (or specified), music at lower volume
@@ -252,6 +252,78 @@ class FFmpegService {
           resolve(metadata.format.duration || 0);
         }
       });
+    });
+  }
+
+  /**
+   * Extend audio file to match target duration by looping
+   */
+  async extendAudioDuration(
+    inputPath: string,
+    targetDuration: number,
+    outputPath: string
+  ): Promise<string> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        // Get current duration
+        const currentDuration = await this.getAudioDuration(inputPath);
+
+        // If already long enough, just copy
+        if (currentDuration >= targetDuration) {
+          logger.info('Audio already meets target duration, copying file');
+          return await this.processAudio(
+            { filePath: inputPath },
+            outputPath,
+            'mp3'
+          ).then(resolve).catch(reject);
+        }
+
+        // Calculate how many times to loop
+        const loopCount = Math.ceil(targetDuration / currentDuration);
+
+        logger.info(`Extending audio from ${currentDuration}s to ${targetDuration}s (looping ${loopCount} times)`);
+
+        // Use FFmpeg to loop the audio
+        const command = ffmpeg();
+
+        // Add input with loop option
+        command.input(inputPath);
+
+        // Create filter to loop and trim to exact duration
+        const filters = [
+          `aloop=loop=${loopCount - 1}:size=44100*${Math.ceil(currentDuration)}`,
+          `atrim=0:${targetDuration}`,
+          'asetpts=PTS-STARTPTS'
+        ];
+
+        command.audioFilters(filters);
+
+        // Set output options
+        this.setOutputOptions(command, 'mp3');
+
+        // Set output
+        command.output(outputPath);
+
+        // Handle events
+        command
+          .on('start', (commandLine) => {
+            logger.info('Extending audio duration with FFmpeg');
+            logger.debug('FFmpeg extend command:', commandLine.substring(0, 200));
+          })
+          .on('end', () => {
+            logger.info('Audio extension completed:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err) => {
+            logger.error('FFmpeg extend error:', err.message);
+            reject(new Error(`Failed to extend audio: ${err.message}`));
+          });
+
+        // Run
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
     });
   }
 

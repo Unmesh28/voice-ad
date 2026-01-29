@@ -179,7 +179,7 @@ export class ProductionOrchestrator {
       const musicJob = await musicGenerationQueue.add('generate-music', {
         userId,
         text: musicPrompt,
-        duration_seconds: Math.min(duration, 22), // ElevenLabs max is 22 seconds
+        duration_seconds: Math.min(duration, 22), // ElevenLabs max is 22s, will be extended to match voice
         prompt_influence: 0.3,
         genre: 'corporate',
         mood: tone,
@@ -208,8 +208,8 @@ export class ProductionOrchestrator {
         scriptId: script.id,
         musicId: musicResult.musicId,
         settings: {
-          voiceVolume: 100,
-          musicVolume: 25,
+          voiceVolume: 1.0,  // 100% - full voice volume for clarity
+          musicVolume: 0.15, // 15% - reduced music volume to be background only
           fadeIn: 2,
           fadeOut: 2,
           ducking: true,
