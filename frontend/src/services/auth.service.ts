@@ -5,9 +5,9 @@ class AuthService {
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
     const response = await api.post<AuthResponse>('/auth/login', credentials);
 
-    if (response.data) {
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
+    if (response) {
+      localStorage.setItem('token', response.token);
+      localStorage.setItem('user', JSON.stringify(response.user));
     }
 
     return response;
@@ -16,9 +16,9 @@ class AuthService {
   async register(data: RegisterData): Promise<AuthResponse> {
     const response = await api.post<AuthResponse>('/auth/register', data);
 
-    if (response.data) {
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
+    if (response) {
+      localStorage.setItem('token', response.token);
+      localStorage.setItem('user', JSON.stringify(response.user));
     }
 
     return response;
@@ -51,8 +51,11 @@ class AuthService {
 
   async refreshToken(): Promise<string> {
     const response = await api.post<{ token: string }>('/auth/refresh');
-    localStorage.setItem('token', response.token);
-    return response.token;
+    if (response && response.token) {
+      localStorage.setItem('token', response.token);
+      return response.token;
+    }
+    throw new Error('Failed to refresh token');
   }
 
   async getProfile(): Promise<User> {
