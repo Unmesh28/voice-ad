@@ -148,13 +148,14 @@ export class ProductionOrchestrator {
       // Stage 2: Generate TTS (Voice)
       logger.info(`[Pipeline ${productionId}] Stage 2: Generating TTS with voice ${selectedVoiceId}`);
       const ttsJob = await ttsGenerationQueue.add('generate-tts', {
+        userId,
         scriptId: script.id,
         voiceId: selectedVoiceId,
-        settings: {
+        voiceSettings: {
           stability: 0.75,
-          similarityBoost: 0.75,
+          similarity_boost: 0.75,
           style: 0.5,
-          useSpeakerBoost: true,
+          use_speaker_boost: true,
         },
       });
 

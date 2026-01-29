@@ -77,7 +77,6 @@ Respond ONLY with valid JSON, no additional text.`;
           model: this.model,
           messages,
           temperature: 0.3,
-          response_format: { type: 'json_object' },
         },
         {
           headers: {
@@ -88,7 +87,17 @@ Respond ONLY with valid JSON, no additional text.`;
         }
       );
 
-      const analysis = JSON.parse(response.data.choices[0].message.content || '{}');
+      const content = response.data.choices[0].message.content || '{}';
+
+      // Extract JSON from response (may be wrapped in markdown code blocks)
+      let jsonStr = content.trim();
+      if (jsonStr.startsWith('```json')) {
+        jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/\n?```/g, '');
+      } else if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/```\n?/g, '').replace(/\n?```/g, '');
+      }
+
+      const analysis = JSON.parse(jsonStr);
 
       logger.info('Script analysis completed', analysis);
 
