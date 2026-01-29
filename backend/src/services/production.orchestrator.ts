@@ -1,8 +1,10 @@
 import prisma from '../config/database';
-import { scriptGenerationQueue } from '../jobs/scriptGeneration.worker';
-import { ttsGenerationQueue } from '../jobs/ttsGeneration.worker';
-import { musicGenerationQueue } from '../jobs/musicGeneration.worker';
-import { audioMixingQueue } from '../jobs/audioMixing.worker';
+import {
+  scriptGenerationQueue,
+  ttsGenerationQueue,
+  musicGenerationQueue,
+  audioMixingQueue,
+} from '../config/redis';
 import { logger } from '../config/logger';
 
 interface QuickProductionInput {
