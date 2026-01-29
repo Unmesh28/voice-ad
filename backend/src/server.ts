@@ -9,6 +9,7 @@ import apiRoutes from './routes';
 import createScriptGenerationWorker from './jobs/scriptGeneration.worker';
 import createTTSGenerationWorker from './jobs/ttsGeneration.worker';
 import createMusicGenerationWorker from './jobs/musicGeneration.worker';
+import createAudioMixingWorker from './jobs/audioMixing.worker';
 
 // Load environment variables
 dotenv.config();
@@ -67,6 +68,7 @@ const startServer = async () => {
     createScriptGenerationWorker();
     createTTSGenerationWorker();
     createMusicGenerationWorker();
+    createAudioMixingWorker();
 
     // Start Express server
     app.listen(PORT, () => {

@@ -1,0 +1,224 @@
+import { Worker, Job } from 'bullmq';
+import { audioMixingQueue } from '../config/redis';
+import prisma from '../config/database';
+import ffmpegService from '../services/audio/ffmpeg.service';
+import { logger } from '../config/logger';
+import redisConnection from '../config/redis';
+import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+
+interface AudioMixingJobData {
+  userId: string;
+  productionId: string;
+}
+
+/**
+ * Process audio mixing jobs
+ */
+const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
+  const { userId, productionId } = job.data;
+
+  logger.info(`Processing audio mixing job ${job.id}`, {
+    userId,
+    productionId,
+  });
+
+  try {
+    // Update job progress
+    await job.updateProgress(10);
+
+    // Get production with related data
+    const production = await prisma.production.findFirst({
+      where: {
+        id: productionId,
+        project: {
+          userId,
+        },
+      },
+      include: {
+        script: true,
+        music: true,
+      },
+    });
+
+    if (!production) {
+      throw new Error('Production not found or access denied');
+    }
+
+    // Update production status
+    await prisma.production.update({
+      where: { id: production.id },
+      data: { status: 'MIXING', progress: 20 },
+    });
+
+    await job.updateProgress(20);
+
+    // Get voice audio URL from script metadata
+    const scriptMetadata = production.script?.metadata as any;
+    const voiceAudioUrl = scriptMetadata?.lastTTS?.audioUrl;
+
+    if (!voiceAudioUrl) {
+      throw new Error('No voice audio found for this script. Please generate TTS first.');
+    }
+
+    // Get music audio URL
+    const musicAudioUrl = production.music?.fileUrl;
+
+    // Prepare file paths
+    const uploadDir = process.env.UPLOAD_DIR || './uploads';
+    const voicePath = voiceAudioUrl ? path.join(uploadDir, voiceAudioUrl.replace('/uploads/', '')) : undefined;
+    const musicPath = musicAudioUrl ? path.join(uploadDir, musicAudioUrl.replace('/uploads/', '')) : undefined;
+
+    // Get settings
+    const settings = (production.settings as any) || {};
+    const voiceVolume = settings.voiceVolume !== undefined ? settings.voiceVolume : 1.0;
+    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.3;
+    const fadeIn = settings.fadeIn || 0;
+    const fadeOut = settings.fadeOut || 0;
+    const audioDucking = settings.audioDucking !== false;
+    const outputFormat = settings.outputFormat || 'mp3';
+
+    // Generate output filename
+    const filename = `production_${production.id}_${uuidv4()}.${outputFormat}`;
+    const outputPath = path.join(uploadDir, 'productions', filename);
+
+    // Ensure productions directory exists
+    const fs = require('fs');
+    const productionsDir = path.join(uploadDir, 'productions');
+    if (!fs.existsSync(productionsDir)) {
+      fs.mkdirSync(productionsDir, { recursive: true });
+    }
+
+    await job.updateProgress(30);
+
+    // Mix audio
+    logger.info(`Mixing audio for production ${productionId}`);
+    await ffmpegService.mixAudio({
+      voiceInput: voicePath ? {
+        filePath: voicePath,
+        volume: voiceVolume,
+        fadeIn,
+        fadeOut,
+      } : undefined,
+      musicInput: musicPath ? {
+        filePath: musicPath,
+        volume: musicVolume,
+        fadeIn,
+        fadeOut,
+      } : undefined,
+      outputPath,
+      outputFormat: outputFormat as any,
+      audioDucking,
+      normalize: true,
+    });
+
+    await job.updateProgress(80);
+
+    // Get duration
+    const duration = await ffmpegService.getAudioDuration(outputPath);
+
+    const productionUrl = `/uploads/productions/${filename}`;
+
+    // Update production
+    await prisma.production.update({
+      where: { id: production.id },
+      data: {
+        status: 'COMPLETED',
+        progress: 100,
+        outputUrl: productionUrl,
+        duration: Math.round(duration),
+      },
+    });
+
+    // Track usage
+    await prisma.usageRecord.create({
+      data: {
+        userId,
+        resourceType: 'AUDIO_MIXING',
+        quantity: 1,
+        metadata: {
+          productionId: production.id,
+          duration: Math.round(duration),
+          jobId: job.id,
+        },
+      },
+    });
+
+    await job.updateProgress(100);
+
+    logger.info(`Audio mixing completed for job ${job.id}`, {
+      productionId: production.id,
+      outputUrl: productionUrl,
+    });
+
+    return {
+      success: true,
+      productionId: production.id,
+      outputUrl: productionUrl,
+      duration: Math.round(duration),
+    };
+  } catch (error: any) {
+    logger.error(`Audio mixing failed for job ${job.id}:`, {
+      error: error.message,
+      stack: error.stack,
+    });
+
+    // Update production status to failed
+    await prisma.production.update({
+      where: { id: productionId },
+      data: {
+        status: 'FAILED',
+        errorMessage: error.message,
+      },
+    });
+
+    // Create a job record in database for tracking
+    await prisma.job.create({
+      data: {
+        id: job.id as string,
+        type: 'AUDIO_MIXING',
+        payload: job.data,
+        status: 'FAILED',
+        errorMessage: error.message,
+        attempts: job.attemptsMade,
+      },
+    });
+
+    throw error;
+  }
+};
+
+/**
+ * Create and start the audio mixing worker
+ */
+export const createAudioMixingWorker = () => {
+  const worker = new Worker('audio-mixing', processAudioMixing, {
+    connection: redisConnection,
+    concurrency: 2, // Process up to 2 jobs concurrently
+    limiter: {
+      max: 5, // Max 5 jobs
+      duration: 60000, // Per 60 seconds
+    },
+  });
+
+  worker.on('completed', (job) => {
+    logger.info(`Audio mixing job ${job.id} completed successfully`);
+  });
+
+  worker.on('failed', (job, err) => {
+    logger.error(`Audio mixing job ${job?.id} failed:`, {
+      error: err.message,
+      attempts: job?.attemptsMade,
+    });
+  });
+
+  worker.on('error', (err) => {
+    logger.error('Audio mixing worker error:', err);
+  });
+
+  logger.info('Audio mixing worker started');
+
+  return worker;
+};
+
+export default createAudioMixingWorker;

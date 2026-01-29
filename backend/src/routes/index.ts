@@ -5,6 +5,7 @@ import projectRoutes from './project.routes';
 import scriptRoutes from './script.routes';
 import ttsRoutes from './tts.routes';
 import musicRoutes from './music.routes';
+import productionRoutes from './production.routes';
 
 const router = Router();
 
@@ -15,6 +16,7 @@ router.use('/projects', projectRoutes);
 router.use('/scripts', scriptRoutes);
 router.use('/tts', ttsRoutes);
 router.use('/music', musicRoutes);
+router.use('/productions', productionRoutes);
 
 // Health check for API
 router.get('/health', (req, res) => {

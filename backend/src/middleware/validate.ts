@@ -133,4 +133,33 @@ export const schemas = {
     tempo: Joi.string().optional(),
     instruments: Joi.string().optional(),
   }),
+
+  createProduction: Joi.object({
+    projectId: Joi.string().uuid().required(),
+    scriptId: Joi.string().uuid().optional(),
+    voiceId: Joi.string().optional(),
+    musicId: Joi.string().uuid().optional(),
+    settings: Joi.object({
+      voiceVolume: Joi.number().min(0).max(2).optional(),
+      musicVolume: Joi.number().min(0).max(2).optional(),
+      fadeIn: Joi.number().min(0).max(10).optional(),
+      fadeOut: Joi.number().min(0).max(10).optional(),
+      audioDucking: Joi.boolean().optional(),
+      outputFormat: Joi.string().valid('mp3', 'wav', 'aac').optional(),
+    }).optional(),
+  }),
+
+  updateProduction: Joi.object({
+    scriptId: Joi.string().uuid().optional().allow(null),
+    voiceId: Joi.string().optional().allow(null),
+    musicId: Joi.string().uuid().optional().allow(null),
+    settings: Joi.object({
+      voiceVolume: Joi.number().min(0).max(2).optional(),
+      musicVolume: Joi.number().min(0).max(2).optional(),
+      fadeIn: Joi.number().min(0).max(10).optional(),
+      fadeOut: Joi.number().min(0).max(10).optional(),
+      audioDucking: Joi.boolean().optional(),
+      outputFormat: Joi.string().valid('mp3', 'wav', 'aac').optional(),
+    }).optional(),
+  }),
 };
