@@ -88,36 +88,61 @@ class FFmpegService {
     duckingAmount: number,
     normalize: boolean
   ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const command = ffmpeg();
+    return new Promise(async (resolve, reject) => {
+      try {
+        const command = ffmpeg();
 
-      // Add voice input
-      command.input(voiceInput.filePath);
+        // Add voice input
+        command.input(voiceInput.filePath);
 
-      // Add music input
-      command.input(musicInput.filePath);
+        // Add music input
+        command.input(musicInput.filePath);
 
-      // Simplified filter approach to avoid "Result too large" error
-      const filters: string[] = [];
+        // Get duration for fade out calculation
+        const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
 
-      // Apply volume to music (make it quieter as background for clarity)
-      const musicVolume = musicInput.volume !== undefined ? musicInput.volume : 0.15;
+        // Simplified filter approach to avoid "Result too large" error
+        const filters: string[] = [];
 
-      // Simple approach: just adjust volumes and mix
-      // Voice at full volume (or specified), music at lower volume
-      const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
+        // Apply volume to music (make it quieter as background for clarity)
+        const musicVolume = musicInput.volume !== undefined ? musicInput.volume : 0.15;
 
-      filters.push(`[0:a]volume=${voiceVol}[v]`);
-      filters.push(`[1:a]volume=${musicVolume}[m]`);
+        // Simple approach: just adjust volumes and mix
+        // Voice at full volume (or specified), music at lower volume
+        const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-      // Mix the streams
-      filters.push(`[v][m]amix=inputs=2:duration=longest:dropout_transition=2[mixed]`);
+        filters.push(`[0:a]volume=${voiceVol}[v]`);
+        filters.push(`[1:a]volume=${musicVolume}[m]`);
 
-      // Simple volume normalization instead of loudnorm to avoid complexity
-      if (normalize) {
-        filters.push('[mixed]volume=1.5[out]');
-      } else {
-        filters.push('[mixed]acopy[out]');
+        // Mix the streams
+        filters.push(`[v][m]amix=inputs=2:duration=longest:dropout_transition=2[mixed]`);
+
+        // Apply fade in/out to the mixed audio for smooth transitions
+        const fadeIn = voiceInput.fadeIn || 1.5; // Default 1.5 second fade in for smooth start
+        const fadeOut = voiceInput.fadeOut || 2.5; // Default 2.5 second fade out for smooth ending
+
+        // Calculate fade out start time (duration - fadeOut seconds)
+        const fadeOutStart = Math.max(0, voiceDuration - fadeOut);
+
+        logger.info('Applying audio fades:', {
+          fadeIn: `${fadeIn}s`,
+          fadeOut: `${fadeOut}s`,
+          fadeOutStart: `${fadeOutStart}s`,
+          totalDuration: `${voiceDuration}s`,
+        });
+
+        // Apply fades to mixed audio for professional smooth transitions
+        filters.push(`[mixed]afade=t=in:st=0:d=${fadeIn},afade=t=out:st=${fadeOutStart}:d=${fadeOut}[faded]`);
+
+        // Simple volume normalization instead of loudnorm to avoid complexity
+        if (normalize) {
+          filters.push('[faded]volume=1.5[out]');
+        } else {
+          filters.push('[faded]acopy[out]');
+        }
+      } catch (error: any) {
+        reject(error);
+        return;
       }
 
       // Set filter complex
@@ -155,30 +180,45 @@ class FFmpegService {
   }
 
   /**
-   * Process single audio file (convert, apply effects)
+   * Process single audio file (convert, apply effects, add fades)
    */
   private async processAudio(
     input: AudioInput,
     outputPath: string,
     outputFormat: string
   ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const command = ffmpeg(input.filePath);
+    return new Promise(async (resolve, reject) => {
+      try {
+        const command = ffmpeg(input.filePath);
 
-      // Build filter
-      const filters: string[] = [];
+        // Get duration for fade out calculation
+        const audioDuration = await this.getAudioDuration(input.filePath);
 
-      // Apply volume
-      if (input.volume !== undefined && input.volume !== 1) {
-        filters.push(`volume=${input.volume}`);
-      }
+        // Build filter
+        const filters: string[] = [];
 
-      // Apply fade in/out
-      if (input.fadeIn) {
-        filters.push(`afade=t=in:st=0:d=${input.fadeIn}`);
-      }
-      if (input.fadeOut) {
-        filters.push(`afade=t=out:st=${input.fadeOut}:d=1`);
+        // Apply volume
+        if (input.volume !== undefined && input.volume !== 1) {
+          filters.push(`volume=${input.volume}`);
+        }
+
+        // Apply fade in at start
+        const fadeIn = input.fadeIn || 1.5;
+        filters.push(`afade=t=in:st=0:d=${fadeIn}`);
+
+        // Apply fade out at end
+        const fadeOut = input.fadeOut || 2.5;
+        const fadeOutStart = Math.max(0, audioDuration - fadeOut);
+        filters.push(`afade=t=out:st=${fadeOutStart}:d=${fadeOut}`);
+
+        logger.info('Processing single audio with fades:', {
+          fadeIn: `${fadeIn}s`,
+          fadeOut: `${fadeOut}s`,
+          duration: `${audioDuration}s`,
+        });
+      } catch (error: any) {
+        reject(error);
+        return;
       }
 
       // Apply filters if any
