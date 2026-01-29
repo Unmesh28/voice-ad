@@ -113,7 +113,7 @@ const processMusicGeneration = async (job: Job<MusicGenerationJobData>) => {
       data: {
         id: job.id as string,
         type: 'MUSIC_GENERATION',
-        payload: job.data,
+        payload: job.data as any,
         status: 'FAILED',
         errorMessage: error.message,
         attempts: job.attemptsMade,

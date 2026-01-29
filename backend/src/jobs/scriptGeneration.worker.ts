@@ -100,7 +100,7 @@ const processScriptGeneration = async (job: Job<ScriptGenerationJobData>) => {
       data: {
         id: job.id as string,
         type: 'SCRIPT_GENERATION',
-        payload: job.data,
+        payload: job.data as any,
         status: 'FAILED',
         errorMessage: error.message,
         attempts: job.attemptsMade,

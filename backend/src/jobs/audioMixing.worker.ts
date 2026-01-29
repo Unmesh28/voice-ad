@@ -177,7 +177,7 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       data: {
         id: job.id as string,
         type: 'AUDIO_MIXING',
-        payload: job.data,
+        payload: job.data as any,
         status: 'FAILED',
         errorMessage: error.message,
         attempts: job.attemptsMade,
