@@ -4,7 +4,10 @@ import {
   ttsGenerationQueue,
   musicGenerationQueue,
   audioMixingQueue,
+  QUEUE_NAMES,
 } from '../config/redis';
+import { QueueEvents } from 'bullmq';
+import redisConnection from '../config/redis';
 import { logger } from '../config/logger';
 
 interface QuickProductionInput {
@@ -84,6 +87,12 @@ export class ProductionOrchestrator {
     duration: number,
     tone: string
   ): Promise<void> {
+    // Create QueueEvents for job completion tracking
+    const scriptQueueEvents = new QueueEvents(QUEUE_NAMES.SCRIPT_GENERATION, { connection: redisConnection });
+    const ttsQueueEvents = new QueueEvents(QUEUE_NAMES.TTS_GENERATION, { connection: redisConnection });
+    const musicQueueEvents = new QueueEvents(QUEUE_NAMES.MUSIC_GENERATION, { connection: redisConnection });
+    const mixingQueueEvents = new QueueEvents(QUEUE_NAMES.AUDIO_MIXING, { connection: redisConnection });
+
     try {
       // Stage 1: Generate Script
       logger.info(`[Pipeline ${productionId}] Stage 1: Generating script`);
@@ -98,7 +107,7 @@ export class ProductionOrchestrator {
         variations: 1,
       });
 
-      const scriptResult = await scriptJob.waitUntilFinished();
+      const scriptResult = await scriptJob.waitUntilFinished(scriptQueueEvents);
 
       if (!scriptResult?.scriptId) {
         throw new Error('Script generation failed - no script ID returned');
@@ -131,7 +140,7 @@ export class ProductionOrchestrator {
         },
       });
 
-      await ttsJob.waitUntilFinished();
+      await ttsJob.waitUntilFinished(ttsQueueEvents);
       await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 50, 'Speech generated! Creating background music...');
 
       // Stage 3: Generate Music
@@ -143,7 +152,7 @@ export class ProductionOrchestrator {
         mood: tone,
       });
 
-      const musicResult = await musicJob.waitUntilFinished();
+      const musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
 
       if (!musicResult?.musicId) {
         throw new Error('Music generation failed - no music ID returned');
@@ -174,7 +183,7 @@ export class ProductionOrchestrator {
         },
       });
 
-      const mixingResult = await mixingJob.waitUntilFinished();
+      const mixingResult = await mixingJob.waitUntilFinished(mixingQueueEvents);
 
       if (!mixingResult?.outputUrl) {
         throw new Error('Audio mixing failed - no output URL returned');
@@ -198,6 +207,12 @@ export class ProductionOrchestrator {
       logger.error(`[Pipeline ${productionId}] Pipeline failed:`, error);
       await this.updateProductionStatus(productionId, 'FAILED', 0, error.message || 'Pipeline execution failed');
       throw error;
+    } finally {
+      // Clean up QueueEvents connections
+      await scriptQueueEvents.close();
+      await ttsQueueEvents.close();
+      await musicQueueEvents.close();
+      await mixingQueueEvents.close();
     }
   }
 
