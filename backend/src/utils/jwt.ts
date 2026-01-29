@@ -1,4 +1,4 @@
-import jwt, { Secret } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 import { User } from '@prisma/client';
 
 interface JWTPayload {
@@ -7,10 +7,10 @@ interface JWTPayload {
   role: string;
 }
 
-const JWT_SECRET: Secret = process.env.JWT_SECRET || 'your-secret-key';
-const JWT_REFRESH_SECRET: Secret = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
-const JWT_EXPIRE: string = process.env.JWT_EXPIRE || '7d';
-const JWT_REFRESH_EXPIRE: string = process.env.JWT_REFRESH_EXPIRE || '30d';
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
+const JWT_EXPIRE = process.env.JWT_EXPIRE || '7d';
+const JWT_REFRESH_EXPIRE = process.env.JWT_REFRESH_EXPIRE || '30d';
 
 export const generateToken = (user: User): string => {
   const payload: JWTPayload = {
@@ -19,8 +19,8 @@ export const generateToken = (user: User): string => {
     role: user.role,
   };
 
-  return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: JWT_EXPIRE,
+  return jwt.sign(payload, JWT_SECRET as jwt.Secret, {
+    expiresIn: JWT_EXPIRE as string,
   });
 };
 
@@ -31,14 +31,14 @@ export const generateRefreshToken = (user: User): string => {
     role: user.role,
   };
 
-  return jwt.sign(payload, JWT_REFRESH_SECRET, {
-    expiresIn: JWT_REFRESH_EXPIRE,
+  return jwt.sign(payload, JWT_REFRESH_SECRET as jwt.Secret, {
+    expiresIn: JWT_REFRESH_EXPIRE as string,
   });
 };
 
 export const verifyToken = (token: string): JWTPayload => {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET as jwt.Secret);
     return decoded as JWTPayload;
   } catch (error) {
     throw new Error('Invalid token');
@@ -47,7 +47,7 @@ export const verifyToken = (token: string): JWTPayload => {
 
 export const verifyRefreshToken = (token: string): JWTPayload => {
   try {
-    const decoded = jwt.verify(token, JWT_REFRESH_SECRET);
+    const decoded = jwt.verify(token, JWT_REFRESH_SECRET as jwt.Secret);
     return decoded as JWTPayload;
   } catch (error) {
     throw new Error('Invalid refresh token');
