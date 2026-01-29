@@ -90,14 +90,14 @@ const processTTSGeneration = async (job: Job<TTSGenerationJobData>) => {
           ...(script.metadata as object),
           lastTTS: {
             voiceId,
-            voiceSettings: settings,
+            voiceSettings: settings as any,
             audioUrl,
             characterCount,
             estimatedDuration,
             generatedAt: new Date().toISOString(),
             jobId: job.id,
           },
-        },
+        } as any,
       },
     });
 
