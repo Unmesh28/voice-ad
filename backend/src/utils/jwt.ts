@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, { Secret } from 'jsonwebtoken';
 import { User } from '@prisma/client';
 
 interface JWTPayload {
@@ -7,10 +7,10 @@ interface JWTPayload {
   role: string;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
-const JWT_EXPIRE = process.env.JWT_EXPIRE || '7d';
-const JWT_REFRESH_EXPIRE = process.env.JWT_REFRESH_EXPIRE || '30d';
+const JWT_SECRET: Secret = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_REFRESH_SECRET: Secret = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key';
+const JWT_EXPIRE: string = process.env.JWT_EXPIRE || '7d';
+const JWT_REFRESH_EXPIRE: string = process.env.JWT_REFRESH_EXPIRE || '30d';
 
 export const generateToken = (user: User): string => {
   const payload: JWTPayload = {
@@ -38,7 +38,8 @@ export const generateRefreshToken = (user: User): string => {
 
 export const verifyToken = (token: string): JWTPayload => {
   try {
-    return jwt.verify(token, JWT_SECRET) as JWTPayload;
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return decoded as JWTPayload;
   } catch (error) {
     throw new Error('Invalid token');
   }
@@ -46,7 +47,8 @@ export const verifyToken = (token: string): JWTPayload => {
 
 export const verifyRefreshToken = (token: string): JWTPayload => {
   try {
-    return jwt.verify(token, JWT_REFRESH_SECRET) as JWTPayload;
+    const decoded = jwt.verify(token, JWT_REFRESH_SECRET);
+    return decoded as JWTPayload;
   } catch (error) {
     throw new Error('Invalid refresh token');
   }
