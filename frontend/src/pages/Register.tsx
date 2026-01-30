@@ -43,7 +43,7 @@ const Register = () => {
     try {
       const { confirmPassword, ...registerData } = formData;
       const response = await authService.register(registerData);
-      setUser(response.data.user);
+      setUser(response.user);
       toast.success('Registration successful!');
       navigate('/dashboard');
     } catch (error: any) {
