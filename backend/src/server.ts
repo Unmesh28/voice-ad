@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { logger } from './config/logger';
 import { errorHandler } from './middleware/errorHandler';
-import { connectDatabase } from './config/database';
+import { connectDB } from './config/mongoose';
 import apiRoutes from './routes';
 import createScriptGenerationWorker from './jobs/scriptGeneration.worker';
 import createTTSGenerationWorker from './jobs/ttsGeneration.worker';
@@ -87,8 +87,8 @@ app.use(errorHandler);
 // Start server
 const startServer = async () => {
   try {
-    // Connect to database
-    await connectDatabase();
+    // Connect to MongoDB via Mongoose
+    await connectDB();
 
     // Start queue workers
     createScriptGenerationWorker();
