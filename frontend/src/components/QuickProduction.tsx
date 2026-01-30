@@ -21,6 +21,7 @@ import {
 import { AutoAwesome, Download, CheckCircle, Error, PlayArrow } from '@mui/icons-material';
 import productionService from '../services/production.service';
 import toast from 'react-hot-toast';
+import { getMediaUrl } from '../config/api.config';
 
 interface ProductionStage {
   label: string;
@@ -115,7 +116,7 @@ const QuickProduction = () => {
   const handleDownload = () => {
     if (outputUrl) {
       const link = document.createElement('a');
-      link.href = `http://localhost:5000${outputUrl}`;
+      link.href = getMediaUrl(outputUrl);
       link.download = 'production.mp3';
       link.click();
     }
@@ -515,7 +516,7 @@ const QuickProduction = () => {
               >
                 <audio
                   controls
-                  src={`http://localhost:5000${outputUrl}`}
+                  src={getMediaUrl(outputUrl)}
                   style={{
                     width: '100%',
                     borderRadius: '8px',
