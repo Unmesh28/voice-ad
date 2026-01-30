@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { Worker, Job } from 'bullmq';
 import { scriptGenerationQueue } from '../config/redis';
 import { Script } from '../models/Script';
