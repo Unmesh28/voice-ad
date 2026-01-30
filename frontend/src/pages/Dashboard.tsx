@@ -66,7 +66,7 @@ const Dashboard = () => {
 
       <Grid container spacing={3} sx={{ mt: 1 }}>
         {cards.map((card, index) => (
-          <Grid item xs={12} md={4} key={index}>
+          <Grid item xs={12} sm={6} md={4} lg={3} xl={2.4} key={index}>
             <Paper
               elevation={2}
               sx={{
