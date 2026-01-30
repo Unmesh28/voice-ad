@@ -39,18 +39,19 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Serve static files (audio uploads) with proper headers
+const uploadsPath = path.join(process.cwd(), process.env.UPLOAD_DIR || 'uploads');
 app.use('/uploads', (req, res, next) => {
   // Set proper headers for audio files
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Access-Control-Allow-Origin', '*');
   next();
-}, express.static('uploads', {
-  setHeaders: (res, path) => {
-    if (path.endsWith('.mp3')) {
+}, express.static(uploadsPath, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.mp3')) {
       res.setHeader('Content-Type', 'audio/mpeg');
-    } else if (path.endsWith('.wav')) {
+    } else if (filePath.endsWith('.wav')) {
       res.setHeader('Content-Type', 'audio/wav');
-    } else if (path.endsWith('.aac')) {
+    } else if (filePath.endsWith('.aac')) {
       res.setHeader('Content-Type', 'audio/aac');
     }
   }
