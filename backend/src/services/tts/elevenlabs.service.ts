@@ -51,7 +51,7 @@ class ElevenLabsService {
         headers: {
           'xi-api-key': this.apiKey,
         },
-        timeout: 10000,
+        timeout: 30000, // Increased to 30 seconds for better reliability
       });
 
       const voices = response.data.voices || [];
@@ -83,7 +83,7 @@ class ElevenLabsService {
         headers: {
           'xi-api-key': this.apiKey,
         },
-        timeout: 10000,
+        timeout: 30000, // Increased to 30 seconds for better reliability
       });
 
       return response.data;
