@@ -6,6 +6,7 @@ export interface IUser extends Document {
   firstName: string;
   lastName: string;
   apiKey: string;
+  role: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -36,6 +37,11 @@ const UserSchema = new Schema<IUser>(
       type: String,
       required: true,
       unique: true,
+    },
+    role: {
+      type: String,
+      default: 'user',
+      enum: ['user', 'admin'],
     },
     isActive: {
       type: Boolean,
