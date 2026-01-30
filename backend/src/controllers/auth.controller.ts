@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { randomBytes } from 'crypto';
-import prisma from '../config/database';
+import { User } from '../models/User';
 import { hashPassword, comparePassword } from '../utils/password';
 import { generateToken, generateRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
@@ -10,9 +10,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   const { email, password, firstName, lastName } = req.body;
 
   // Check if user already exists
-  const existingUser = await prisma.user.findUnique({
-    where: { email },
-  });
+  const existingUser = await User.findOne({ email });
 
   if (existingUser) {
     throw new AppError('User with this email already exists', 400);
@@ -25,29 +23,50 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   const apiKey = `vad_${randomBytes(32).toString('hex')}`;
 
   // Create user
-  const user = await prisma.user.create({
-    data: {
-      email,
-      passwordHash,
-      firstName,
-      lastName,
-      apiKey,
-    },
+  const user = await User.create({
+    email,
+    password: passwordHash,
+    firstName,
+    lastName,
+    apiKey,
   });
 
+  // Create user object for token
+  const userForToken = {
+    id: user._id.toString(),
+    email: user.email,
+    role: 'user',
+    firstName: user.firstName,
+    lastName: user.lastName,
+    apiKey: user.apiKey,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    passwordHash: '',
+    lastLoginAt: null,
+  };
+
   // Generate tokens
-  const token = generateToken(user);
-  const refreshToken = generateRefreshToken(user);
+  const token = generateToken(userForToken as any);
+  const refreshToken = generateRefreshToken(userForToken as any);
 
   logger.info(`New user registered: ${user.email}`);
 
-  // Remove password hash from response
-  const { passwordHash: _, ...userWithoutPassword } = user;
+  // Remove password from response
+  const userResponse = {
+    id: user._id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    apiKey: user.apiKey,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+  };
 
   res.status(201).json({
     success: true,
     data: {
-      user: userWithoutPassword,
+      user: userResponse,
       token,
       refreshToken,
     },
@@ -58,11 +77,10 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
   // Find user by email
-  const user = await prisma.user.findUnique({
-    where: { email },
-  });
+  const user = await User.findOne({ email });
 
   if (!user) {
+    logger.warn('Invalid email or password');
     throw new AppError('Invalid email or password', 401);
   }
 
@@ -72,31 +90,49 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   }
 
   // Verify password
-  const isPasswordValid = await comparePassword(password, user.passwordHash);
+  const isPasswordValid = await comparePassword(password, user.password);
 
   if (!isPasswordValid) {
+    logger.warn('Invalid email or password');
     throw new AppError('Invalid email or password', 401);
   }
 
-  // Update last login
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastLoginAt: new Date() },
-  });
+  // Create user object for token
+  const userForToken = {
+    id: user._id.toString(),
+    email: user.email,
+    role: 'user',
+    firstName: user.firstName,
+    lastName: user.lastName,
+    apiKey: user.apiKey,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    passwordHash: '',
+    lastLoginAt: null,
+  };
 
   // Generate tokens
-  const token = generateToken(user);
-  const refreshToken = generateRefreshToken(user);
+  const token = generateToken(userForToken as any);
+  const refreshToken = generateRefreshToken(userForToken as any);
 
   logger.info(`User logged in: ${user.email}`);
 
-  // Remove password hash from response
-  const { passwordHash: _, ...userWithoutPassword } = user;
+  // Remove password from response
+  const userResponse = {
+    id: user._id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    apiKey: user.apiKey,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+  };
 
   res.json({
     success: true,
     data: {
-      user: userWithoutPassword,
+      user: userResponse,
       token,
       refreshToken,
     },
@@ -114,17 +150,30 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
   const decoded = verifyRefreshToken(refreshToken);
 
   // Get user
-  const user = await prisma.user.findUnique({
-    where: { id: decoded.userId },
-  });
+  const user = await User.findById(decoded.userId);
 
   if (!user || !user.isActive) {
     throw new AppError('Invalid refresh token', 401);
   }
 
+  // Create user object for token
+  const userForToken = {
+    id: user._id.toString(),
+    email: user.email,
+    role: 'user',
+    firstName: user.firstName,
+    lastName: user.lastName,
+    apiKey: user.apiKey,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    passwordHash: '',
+    lastLoginAt: null,
+  };
+
   // Generate new tokens
-  const newToken = generateToken(user);
-  const newRefreshToken = generateRefreshToken(user);
+  const newToken = generateToken(userForToken as any);
+  const newRefreshToken = generateRefreshToken(userForToken as any);
 
   res.json({
     success: true,
