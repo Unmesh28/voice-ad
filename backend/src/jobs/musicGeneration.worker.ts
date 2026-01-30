@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { Worker, Job } from 'bullmq';
 import { musicGenerationQueue } from '../config/redis';
 import { MusicTrack } from '../models/MusicTrack';

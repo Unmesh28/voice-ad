@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { Worker, Job } from 'bullmq';
 import { audioMixingQueue } from '../config/redis';
 import { Production } from '../models/Production';
