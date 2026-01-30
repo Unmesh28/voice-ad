@@ -135,7 +135,7 @@ module.exports = {
       max_memory_restart: '512M',
       env: {
         NODE_ENV: 'production',
-        FRONTEND_PORT: 3000,
+        FRONTEND_PORT: 80,
       },
       error_file: './logs/frontend-server-error.log',
       out_file: './logs/frontend-server-out.log',
