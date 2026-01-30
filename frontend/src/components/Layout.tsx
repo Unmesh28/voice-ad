@@ -27,7 +27,7 @@ const Layout = () => {
           </Button>
         </Toolbar>
       </AppBar>
-      <Container maxWidth="xl" sx={{ mt: 4, mb: 4, flex: 1 }}>
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4, flex: 1 }}>
         <Outlet />
       </Container>
     </Box>
