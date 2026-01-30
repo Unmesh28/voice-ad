@@ -45,58 +45,68 @@ const Dashboard = () => {
   ];
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Dashboard
-      </Typography>
-      <Typography variant="body1" color="text.secondary" paragraph>
-        Welcome to VoiceAd - AI-powered audio production platform
-      </Typography>
+    <Box sx={{ maxWidth: '100%', mx: 'auto' }}>
+      <Box sx={{ textAlign: 'center', mb: 3 }}>
+        <Typography variant="h4" gutterBottom fontWeight="bold">
+          Dashboard
+        </Typography>
+        <Typography variant="body1" color="text.secondary" paragraph>
+          Welcome to VoiceAd - AI-powered audio production platform
+        </Typography>
+      </Box>
 
       {/* Quick Production - One-Click AI */}
       <QuickProduction />
 
-      <Typography variant="h5" gutterBottom sx={{ mt: 4 }}>
-        Or use individual tools:
-      </Typography>
+      <Box sx={{ textAlign: 'center', mt: 6, mb: 3 }}>
+        <Typography variant="h5" gutterBottom fontWeight="600">
+          Or use individual tools:
+        </Typography>
+      </Box>
 
-      <Grid container spacing={3} sx={{ mt: 2 }}>
+      <Grid container spacing={3} sx={{ mt: 1 }}>
         {cards.map((card, index) => (
           <Grid item xs={12} md={4} key={index}>
             <Paper
+              elevation={2}
               sx={{
                 p: 3,
                 height: '100%',
                 display: 'flex',
                 flexDirection: 'column',
                 cursor: 'pointer',
-                transition: 'transform 0.2s',
+                borderRadius: 3,
+                transition: 'all 0.3s ease',
                 '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: 4,
+                  transform: 'translateY(-6px)',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
                 },
               }}
               onClick={() => navigate(card.path)}
             >
               <Box
                 sx={{
-                  width: 60,
-                  height: 60,
-                  borderRadius: 2,
+                  width: 64,
+                  height: 64,
+                  borderRadius: 2.5,
                   bgcolor: card.color,
                   color: 'white',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  mb: 2,
+                  mb: 2.5,
+                  transition: 'all 0.3s ease',
+                  '&:hover': {
+                    transform: 'rotate(5deg) scale(1.1)',
+                  },
                 }}
               >
                 {card.icon}
               </Box>
-              <Typography variant="h6" gutterBottom>
+              <Typography variant="h6" gutterBottom fontWeight="600">
                 {card.title}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>
                 {card.description}
               </Typography>
             </Paper>
