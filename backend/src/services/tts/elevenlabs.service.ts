@@ -100,7 +100,7 @@ class ElevenLabsService {
     const {
       voiceId,
       text,
-      modelId = 'eleven_turbo_v2_5', // Using latest v3 turbo model for best performance
+      modelId = 'eleven_v3', // Eleven V3 Alpha: Most emotionally expressive model, supports 70+ languages
       voiceSettings = {
         stability: 0.5,
         similarity_boost: 0.8, // Increased for better voice matching in v3
