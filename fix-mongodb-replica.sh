@@ -1,6 +1,5 @@
 #!/bin/bash
 # Quick fix to configure MongoDB as replica set
-# Run this on your EC2 server
 
 echo "🔧 Configuring MongoDB as replica set..."
 
@@ -10,7 +9,6 @@ if [ -f /etc/mongod.conf ]; then
 elif [ -f /etc/mongodb.conf ]; then
     CONFIG_FILE=/etc/mongodb.conf
 else
-    echo "❌ MongoDB config file not found"
     echo "Creating default config at /etc/mongod.conf..."
     sudo tee /etc/mongod.conf > /dev/null <<'MONGOCONF'
 storage:
@@ -68,4 +66,4 @@ mongosh --quiet --eval 'try { rs.status(); print("✓ Replica set already initia
 echo ""
 echo "✅ MongoDB is now configured as a replica set!"
 echo ""
-echo "You can now restart your backend with: npm run dev"
+echo "Restart your backend with: npm run dev"
