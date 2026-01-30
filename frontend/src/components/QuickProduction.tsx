@@ -133,56 +133,70 @@ const QuickProduction = () => {
   return (
     <Fade in timeout={800}>
       <Paper
-        elevation={3}
+        elevation={4}
         sx={{
-          p: { xs: 2, sm: 3, md: 4 },
-          mb: 4,
+          p: { xs: 3, sm: 4, md: 5, lg: 6 },
+          mb: 6,
           background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
           color: 'white',
-          borderRadius: 3,
-          transition: 'all 0.3s ease',
+          borderRadius: 4,
+          position: 'relative',
+          overflow: 'hidden',
+          transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
           '&:hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: '0 8px 24px rgba(102, 126, 234, 0.4)',
+            transform: 'translateY(-4px)',
+            boxShadow: '0 16px 40px rgba(102, 126, 234, 0.5)',
+          },
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'radial-gradient(circle at top right, rgba(255,255,255,0.1) 0%, transparent 50%)',
+            pointerEvents: 'none',
           },
         }}
       >
-        <Slide direction="down" in timeout={600}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, gap: 1 }}>
-            <AutoAwesome
-              sx={{
-                fontSize: { xs: 28, sm: 32 },
-                animation: 'pulse 2s ease-in-out infinite',
-                '@keyframes pulse': {
-                  '0%, 100%': { opacity: 1 },
-                  '50%': { opacity: 0.6 },
-                },
-              }}
-            />
+        <Box sx={{ position: 'relative', zIndex: 1 }}>
+          <Slide direction="down" in timeout={600}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, gap: 1.5 }}>
+              <AutoAwesome
+                sx={{
+                  fontSize: { xs: 32, sm: 36, md: 40 },
+                  animation: 'pulse 2s ease-in-out infinite',
+                  '@keyframes pulse': {
+                    '0%, 100%': { opacity: 1 },
+                    '50%': { opacity: 0.7 },
+                  },
+                }}
+              />
+              <Typography
+                variant="h4"
+                fontWeight="bold"
+                sx={{
+                  fontSize: { xs: '1.5rem', sm: '1.75rem', md: '2rem' },
+                }}
+              >
+                Quick Production - One-Click AI Audio
+              </Typography>
+            </Box>
+          </Slide>
+
+          <Fade in timeout={1000}>
             <Typography
-              variant="h5"
-              fontWeight="bold"
+              variant="body1"
               sx={{
-                fontSize: { xs: '1.25rem', sm: '1.5rem' },
+                mb: 4,
+                opacity: 0.95,
+                fontSize: { xs: '0.95rem', sm: '1.05rem', md: '1.1rem' },
+                lineHeight: 1.6,
               }}
             >
-              Quick Production - One-Click AI Audio
+              Enter a prompt and let AI handle everything: script generation, voice synthesis, music creation, and mixing!
             </Typography>
-          </Box>
-        </Slide>
-
-        <Fade in timeout={1000}>
-          <Typography
-            variant="body2"
-            sx={{
-              mb: 3,
-              opacity: 0.9,
-              fontSize: { xs: '0.875rem', sm: '1rem' },
-            }}
-          >
-            Enter a prompt and let AI handle everything: script generation, voice synthesis, music creation, and mixing!
-          </Typography>
-        </Fade>
+          </Fade>
 
       {!loading && !outputUrl && (
         <Grow in timeout={800}>
@@ -545,6 +559,7 @@ const QuickProduction = () => {
           </Alert>
         </Zoom>
       )}
+        </Box>
       </Paper>
     </Fade>
   );
