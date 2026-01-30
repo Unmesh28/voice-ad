@@ -1,5 +1,8 @@
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+
+// Load environment variables from the backend root directory
+dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 import { Worker, Job } from 'bullmq';
 import { audioMixingQueue } from '../config/redis';
@@ -11,7 +14,6 @@ import ffmpegService from '../services/audio/ffmpeg.service';
 import { logger } from '../config/logger';
 import redisConnection from '../config/redis';
 import { v4 as uuidv4 } from 'uuid';
-import path from 'path';
 import mongoose from 'mongoose';
 
 interface AudioMixingJobData {
