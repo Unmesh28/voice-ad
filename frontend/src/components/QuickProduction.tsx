@@ -29,11 +29,11 @@ interface ProductionStage {
 
 const QuickProduction = () => {
   const [prompt, setPrompt] = useState('');
-  const [voiceId, setVoiceId] = useState('default');
+  const [voiceId] = useState('default');
   const [duration, setDuration] = useState(30);
   const [tone, setTone] = useState('professional');
   const [loading, setLoading] = useState(false);
-  const [productionId, setProductionId] = useState<string | null>(null);
+  const [, setProductionId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [currentStage, setCurrentStage] = useState('');
   const [outputUrl, setOutputUrl] = useState<string | null>(null);

@@ -153,10 +153,11 @@ VITE_API_URL=http://YOUR_EC2_IP_ADDRESS:5000
 # Install dependencies and build
 cd ~/voice-ad
 
-# Backend
+# Backend - Install all dependencies (including TypeScript for building)
 cd backend
-npm install --production
+npm install
 npm run build
+npm prune --production  # Remove dev dependencies after building (saves disk space)
 
 # Frontend
 cd ../frontend
@@ -338,7 +339,7 @@ pm2 save
 # Update application
 cd ~/voice-ad
 git pull
-cd backend && npm install --production && npm run build
+cd backend && npm install && npm run build
 cd ../frontend && npm install && npm run build
 pm2 restart all
 

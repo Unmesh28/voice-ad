@@ -5,9 +5,9 @@ class AuthService {
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
     const response = await api.post<AuthResponse>('/auth/login', credentials);
 
-    if (response) {
-      localStorage.setItem('token', response.token);
-      localStorage.setItem('user', JSON.stringify(response.user));
+    if (response && response.data) {
+      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
     }
 
     return response;
@@ -16,9 +16,9 @@ class AuthService {
   async register(data: RegisterData): Promise<AuthResponse> {
     const response = await api.post<AuthResponse>('/auth/register', data);
 
-    if (response) {
-      localStorage.setItem('token', response.token);
-      localStorage.setItem('user', JSON.stringify(response.user));
+    if (response && response.data) {
+      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
     }
 
     return response;

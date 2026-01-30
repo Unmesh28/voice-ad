@@ -1,4 +1,4 @@
-import { Box, Typography, Grid, Paper, Button } from '@mui/material';
+import { Box, Typography, Grid, Paper } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { Add, Mic, MusicNote, AutoAwesome, RecordVoiceOver } from '@mui/icons-material';
 import QuickProduction from '../components/QuickProduction';
