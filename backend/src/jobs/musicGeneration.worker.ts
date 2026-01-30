@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load environment variables from the backend root directory
-dotenv.config({ path: path.join(__dirname, '../../.env') });
+// Load environment variables from the current working directory
+dotenv.config({ path: path.join(process.cwd(), '.env') });
 
 import { Worker, Job } from 'bullmq';
 import { musicGenerationQueue } from '../config/redis';
