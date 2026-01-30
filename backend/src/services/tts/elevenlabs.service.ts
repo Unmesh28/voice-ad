@@ -100,10 +100,10 @@ class ElevenLabsService {
     const {
       voiceId,
       text,
-      modelId = 'eleven_multilingual_v2',
+      modelId = 'eleven_turbo_v2_5', // Using latest v3 turbo model for best performance
       voiceSettings = {
         stability: 0.5,
-        similarity_boost: 0.75,
+        similarity_boost: 0.8, // Increased for better voice matching in v3
         style: 0.0,
         use_speaker_boost: true,
       },
