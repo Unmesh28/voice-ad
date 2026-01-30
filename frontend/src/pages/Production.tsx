@@ -38,7 +38,7 @@ const Production = () => {
   const [fadeOut, setFadeOut] = useState(2);
   const [audioDucking, setAudioDucking] = useState(true);
   const [outputFormat, setOutputFormat] = useState<'mp3' | 'wav' | 'aac'>('mp3');
-  const [productionId, setProductionId] = useState('');
+  const [, setProductionId] = useState('');
   const [production, setProduction] = useState<ProductionType | null>(null);
 
   // Fetch projects
@@ -57,7 +57,7 @@ const Production = () => {
   // Fetch music tracks
   const { data: musicTracks = [] } = useQuery<MusicTrack[]>({
     queryKey: ['music'],
-    queryFn: () => musicService.getMusicTracks(),
+    queryFn: () => musicService.getMusicLibrary(),
   });
 
   // Create production mutation

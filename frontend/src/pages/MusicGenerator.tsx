@@ -10,15 +10,10 @@ import {
   Divider,
   Chip,
   Slider,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Card,
   CardContent,
-  CardActions,
 } from '@mui/material';
-import { MusicNote, PlayArrow, Download } from '@mui/icons-material';
+import { MusicNote } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import musicService from '../services/music.service';
@@ -129,7 +124,7 @@ const MusicGenerator = () => {
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {genrePresets &&
-                  Object.entries(genrePresets).map(([key, preset]) => (
+                  Object.entries(genrePresets).map(([key]) => (
                     <Chip
                       key={key}
                       label={key.charAt(0).toUpperCase() + key.slice(1)}

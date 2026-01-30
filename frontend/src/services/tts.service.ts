@@ -2,10 +2,10 @@ import api from './api';
 import { Voice } from '../types';
 
 interface VoiceSettings {
-  stability?: number;
-  similarity_boost?: number;
-  style?: number;
-  use_speaker_boost?: boolean;
+  stability: number;
+  similarity_boost: number;
+  style: number;
+  use_speaker_boost: boolean;
 }
 
 interface GenerateTTSData {
