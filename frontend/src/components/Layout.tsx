@@ -27,7 +27,17 @@ const Layout = () => {
           </Button>
         </Toolbar>
       </AppBar>
-      <Box sx={{ mt: 4, mb: 4, flex: 1, px: { xs: 2, sm: 4, md: 6, lg: 8 } }}>
+      <Box
+        sx={{
+          mt: 4,
+          mb: 4,
+          flex: 1,
+          px: { xs: 2, sm: 3, md: 4 },
+          maxWidth: { xs: '100%', sm: '100%', md: '1400px', lg: '1600px', xl: '1800px' },
+          mx: 'auto',
+          width: '100%',
+        }}
+      >
         <Outlet />
       </Box>
     </Box>
