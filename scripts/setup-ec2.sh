@@ -282,12 +282,12 @@ log_step "Step 13: Configuring Redis for Production"
 # Backup original config
 cp /etc/redis/redis.conf /etc/redis/redis.conf.backup
 
-# Configure Redis
+# Configure Redis for BullMQ
 cat >> /etc/redis/redis.conf << 'EOF'
 
-# Custom Configuration for VoiceAd
+# Custom Configuration for VoiceAd + BullMQ
 maxmemory 256mb
-maxmemory-policy allkeys-lru
+maxmemory-policy noeviction
 save 900 1
 save 300 10
 save 60 10000
@@ -296,7 +296,7 @@ EOF
 # Restart Redis
 systemctl restart redis-server
 
-log_info "Redis configured for production"
+log_info "Redis configured for production with noeviction policy"
 
 ################################################################################
 # Step 14: Install and Configure Logrotate
