@@ -1,7 +1,11 @@
+// CRITICAL: Load environment variables FIRST, before any imports
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.join(process.cwd(), '.env') });
+
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import { logger } from './config/logger';
 import { errorHandler } from './middleware/errorHandler';
 import { connectDB } from './config/mongoose';
@@ -10,9 +14,6 @@ import createScriptGenerationWorker from './jobs/scriptGeneration.worker';
 import createTTSGenerationWorker from './jobs/ttsGeneration.worker';
 import createMusicGenerationWorker from './jobs/musicGeneration.worker';
 import createAudioMixingWorker from './jobs/audioMixing.worker';
-
-// Load environment variables
-dotenv.config();
 
 const app: Express = express();
 const PORT = process.env.PORT || 5000;
