@@ -122,6 +122,29 @@ module.exports = {
       max_restarts: 10,
       restart_delay: 4000,
     },
+
+    // Frontend Server
+    {
+      name: 'frontend-server',
+      script: './frontend-server.js',
+      cwd: './',
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '512M',
+      env: {
+        NODE_ENV: 'production',
+        FRONTEND_PORT: 3000,
+      },
+      error_file: './logs/frontend-server-error.log',
+      out_file: './logs/frontend-server-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      merge_logs: true,
+      min_uptime: '10s',
+      max_restarts: 10,
+      restart_delay: 4000,
+    },
   ],
 
   /**
