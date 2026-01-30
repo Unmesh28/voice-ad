@@ -1,10 +1,13 @@
 import { Worker, Job } from 'bullmq';
 import { musicGenerationQueue } from '../config/redis';
-import prisma from '../config/database';
+import { MusicTrack } from '../models/MusicTrack';
+import { Job as JobModel } from '../models/Job';
+import { UsageRecord } from '../models/UsageRecord';
 import elevenLabsMusicService from '../services/music/elevenlabs-music.service';
 import { logger } from '../config/logger';
 import redisConnection from '../config/redis';
 import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
 
 interface MusicGenerationJobData {
   userId: string;
@@ -55,39 +58,37 @@ const processMusicGeneration = async (job: Job<MusicGenerationJobData>) => {
     const musicUrl = `/uploads/music/${filename}`;
 
     // Save to database
-    const musicTrack = await prisma.musicTrack.create({
-      data: {
-        name: name || `Generated Music - ${new Date().toLocaleString()}`,
-        description: text,
-        genre: genre || null,
-        mood: mood || null,
-        duration,
-        fileUrl: musicUrl,
-        isGenerated: true,
-        metadata: {
-          prompt: text,
-          duration_seconds,
-          prompt_influence,
-          generatedAt: new Date().toISOString(),
-          jobId: job.id,
-        },
+    const musicTrack = new MusicTrack({
+      name: name || `Generated Music - ${new Date().toLocaleString()}`,
+      description: text,
+      genre: genre || undefined,
+      mood: mood || undefined,
+      duration,
+      fileUrl: musicUrl,
+      isGenerated: true,
+      metadata: {
+        prompt: text,
+        duration_seconds,
+        prompt_influence,
+        generatedAt: new Date().toISOString(),
+        jobId: job.id,
       },
     });
+    await musicTrack.save();
 
     // Track usage
-    await prisma.usageRecord.create({
-      data: {
-        userId,
-        resourceType: 'MUSIC_GENERATION',
-        quantity: 1,
-        metadata: {
-          musicId: musicTrack.id,
-          duration,
-          prompt: text,
-          jobId: job.id,
-        },
+    const usageRecord = new UsageRecord({
+      userId: new mongoose.Types.ObjectId(userId),
+      resourceType: 'MUSIC_GENERATION',
+      quantity: 1,
+      metadata: {
+        musicId: musicTrack.id,
+        duration,
+        prompt: text,
+        jobId: job.id,
       },
     });
+    await usageRecord.save();
 
     await job.updateProgress(100);
 
@@ -109,15 +110,14 @@ const processMusicGeneration = async (job: Job<MusicGenerationJobData>) => {
     });
 
     // Create a job record in database for tracking
-    await prisma.job.create({
-      data: {
-        type: 'MUSIC_GENERATION',
-        payload: job.data as any,
-        status: 'FAILED',
-        errorMessage: error.message,
-        attempts: job.attemptsMade,
-      },
+    const jobRecord = new JobModel({
+      type: 'MUSIC_GENERATION',
+      payload: job.data as any,
+      status: 'FAILED',
+      errorMessage: error.message,
+      attempts: job.attemptsMade,
     });
+    await jobRecord.save();
 
     throw error;
   }

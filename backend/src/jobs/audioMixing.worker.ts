@@ -1,11 +1,15 @@
 import { Worker, Job } from 'bullmq';
 import { audioMixingQueue } from '../config/redis';
-import prisma from '../config/database';
+import { Production } from '../models/Production';
+import { Job as JobModel } from '../models/Job';
+import { UsageRecord } from '../models/UsageRecord';
+import { Project } from '../models/Project';
 import ffmpegService from '../services/audio/ffmpeg.service';
 import { logger } from '../config/logger';
 import redisConnection from '../config/redis';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import mongoose from 'mongoose';
 
 interface AudioMixingJobData {
   userId: string;
@@ -28,33 +32,32 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     await job.updateProgress(10);
 
     // Get production with related data
-    const production = await prisma.production.findFirst({
-      where: {
-        id: productionId,
-        project: {
-          userId,
-        },
-      },
-      include: {
-        script: true,
-        music: true,
-      },
-    });
+    const production = await Production.findById(productionId)
+      .populate('scriptId')
+      .populate('musicId')
+      .populate('projectId')
+      .exec();
 
     if (!production) {
+      throw new Error('Production not found');
+    }
+
+    // Verify the production's project belongs to the user
+    const project = production.projectId as any;
+    if (!project || project.userId.toString() !== userId) {
       throw new Error('Production not found or access denied');
     }
 
     // Update production status
-    await prisma.production.update({
-      where: { id: production.id },
-      data: { status: 'MIXING', progress: 20 },
-    });
+    production.status = 'MIXING' as any;
+    production.progress = 20;
+    await production.save();
 
     await job.updateProgress(20);
 
     // Get voice audio URL from script metadata
-    const scriptMetadata = production.script?.metadata as any;
+    const script = production.scriptId as any;
+    const scriptMetadata = script?.metadata as any;
     const voiceAudioUrl = scriptMetadata?.lastTTS?.audioUrl;
 
     if (!voiceAudioUrl) {
@@ -62,7 +65,8 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     }
 
     // Get music audio URL
-    const musicAudioUrl = production.music?.fileUrl;
+    const music = production.musicId as any;
+    const musicAudioUrl = music?.fileUrl;
 
     // Prepare file paths
     const uploadDir = process.env.UPLOAD_DIR || './uploads';
@@ -143,29 +147,24 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     const productionUrl = `/uploads/productions/${filename}`;
 
     // Update production
-    await prisma.production.update({
-      where: { id: production.id },
-      data: {
-        status: 'COMPLETED',
-        progress: 100,
-        outputUrl: productionUrl,
-        duration: Math.round(duration),
-      },
-    });
+    production.status = 'COMPLETED' as any;
+    production.progress = 100;
+    production.outputUrl = productionUrl;
+    production.duration = Math.round(duration);
+    await production.save();
 
     // Track usage
-    await prisma.usageRecord.create({
-      data: {
-        userId,
-        resourceType: 'AUDIO_MIXING',
-        quantity: 1,
-        metadata: {
-          productionId: production.id,
-          duration: Math.round(duration),
-          jobId: job.id,
-        },
+    const usageRecord = new UsageRecord({
+      userId: new mongoose.Types.ObjectId(userId),
+      resourceType: 'AUDIO_MIXING',
+      quantity: 1,
+      metadata: {
+        productionId: production.id,
+        duration: Math.round(duration),
+        jobId: job.id,
       },
     });
+    await usageRecord.save();
 
     await job.updateProgress(100);
 
@@ -187,24 +186,20 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     });
 
     // Update production status to failed
-    await prisma.production.update({
-      where: { id: productionId },
-      data: {
-        status: 'FAILED',
-        errorMessage: error.message,
-      },
+    await Production.findByIdAndUpdate(productionId, {
+      status: 'FAILED',
+      errorMessage: error.message,
     });
 
     // Create a job record in database for tracking
-    await prisma.job.create({
-      data: {
-        type: 'AUDIO_MIXING',
-        payload: job.data as any,
-        status: 'FAILED',
-        errorMessage: error.message,
-        attempts: job.attemptsMade,
-      },
+    const jobRecord = new JobModel({
+      type: 'AUDIO_MIXING',
+      payload: job.data as any,
+      status: 'FAILED',
+      errorMessage: error.message,
+      attempts: job.attemptsMade,
     });
+    await jobRecord.save();
 
     throw error;
   }

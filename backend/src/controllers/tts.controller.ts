@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import prisma from '../config/database';
+import { Script } from '../models/Script';
+import { UsageRecord } from '../models/UsageRecord';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import elevenLabsService from '../services/tts/elevenlabs.service';
 import { ttsGenerationQueue } from '../config/redis';
@@ -56,22 +57,22 @@ export const generateTTS = asyncHandler(async (req: Request, res: Response) => {
   const { scriptId, voiceId, voiceSettings } = req.body;
 
   // Verify script exists and belongs to user
-  const script = await prisma.script.findFirst({
-    where: {
-      id: scriptId,
-      project: {
-        userId: req.user.id,
-      },
-    },
-  });
+  const script = await Script.findById(scriptId)
+    .populate('projectId', 'userId')
+    .lean();
 
   if (!script) {
     throw new AppError('Script not found or access denied', 404);
   }
 
+  const project = script.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
+    throw new AppError('Script not found or access denied', 404);
+  }
+
   // Add job to queue for async processing
   const job = await ttsGenerationQueue.add('generate-tts', {
-    userId: req.user.id,
+    userId: req.user._id.toString(),
     scriptId,
     voiceId,
     voiceSettings,
@@ -103,19 +104,16 @@ export const generateTTSSync = asyncHandler(async (req: Request, res: Response) 
   const { scriptId, voiceId, voiceSettings } = req.body;
 
   // Verify script exists and belongs to user
-  const script = await prisma.script.findFirst({
-    where: {
-      id: scriptId,
-      project: {
-        userId: req.user.id,
-      },
-    },
-    include: {
-      project: true,
-    },
-  });
+  const script = await Script.findById(scriptId)
+    .populate('projectId', 'userId')
+    .lean();
 
   if (!script) {
+    throw new AppError('Script not found or access denied', 404);
+  }
+
+  const project = script.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
     throw new AppError('Script not found or access denied', 404);
   }
 
@@ -125,7 +123,7 @@ export const generateTTSSync = asyncHandler(async (req: Request, res: Response) 
     : elevenLabsService.getDefaultVoiceSettings();
 
   // Generate unique filename
-  const filename = `tts_${script.id}_${uuidv4()}.mp3`;
+  const filename = `tts_${script._id}_${uuidv4()}.mp3`;
 
   // Generate speech
   const { filePath, audioBuffer } = await elevenLabsService.generateAndSave(
@@ -145,38 +143,33 @@ export const generateTTSSync = asyncHandler(async (req: Request, res: Response) 
   const audioUrl = `/uploads/audio/${filename}`;
 
   // Update script metadata with audio info
-  await prisma.script.update({
-    where: { id: script.id },
-    data: {
-      metadata: {
-        ...(script.metadata as object),
-        lastTTS: {
-          voiceId,
-          voiceSettings: settings as any,
-          audioUrl,
-          characterCount,
-          estimatedDuration,
-          generatedAt: new Date().toISOString(),
-        },
-      } as any,
-    },
+  await Script.findByIdAndUpdate(scriptId, {
+    metadata: {
+      ...(script.metadata as object),
+      lastTTS: {
+        voiceId,
+        voiceSettings: settings as any,
+        audioUrl,
+        characterCount,
+        estimatedDuration,
+        generatedAt: new Date().toISOString(),
+      },
+    } as any,
   });
 
   // Track usage
-  await prisma.usageRecord.create({
-    data: {
-      userId: req.user.id,
-      resourceType: 'TTS_CHARACTERS',
-      quantity: characterCount,
-      metadata: {
-        scriptId: script.id,
-        voiceId,
-        duration: estimatedDuration,
-      },
+  await UsageRecord.create({
+    userId: req.user._id,
+    resourceType: 'TTS_CHARACTERS',
+    quantity: characterCount,
+    metadata: {
+      scriptId: script._id.toString(),
+      voiceId,
+      duration: estimatedDuration,
     },
   });
 
-  logger.info(`TTS generated successfully for script ${script.id}`);
+  logger.info(`TTS generated successfully for script ${script._id}`);
 
   res.status(201).json({
     success: true,
@@ -236,16 +229,14 @@ export const generateTTSFromText = asyncHandler(async (req: Request, res: Respon
   const audioUrl = `/uploads/audio/${filename}`;
 
   // Track usage
-  await prisma.usageRecord.create({
-    data: {
-      userId: req.user.id,
-      resourceType: 'TTS_CHARACTERS',
-      quantity: characterCount,
-      metadata: {
-        voiceId,
-        duration: estimatedDuration,
-        custom: true,
-      },
+  await UsageRecord.create({
+    userId: req.user._id,
+    resourceType: 'TTS_CHARACTERS',
+    quantity: characterCount,
+    metadata: {
+      voiceId,
+      duration: estimatedDuration,
+      custom: true,
     },
   });
 

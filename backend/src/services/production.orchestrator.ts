@@ -1,4 +1,6 @@
-import prisma from '../config/database';
+import { Project } from '../models/Project';
+import { Production } from '../models/Production';
+import { Script } from '../models/Script';
 import {
   scriptGenerationQueue,
   ttsGenerationQueue,
@@ -10,6 +12,7 @@ import { QueueEvents } from 'bullmq';
 import redisConnection from '../config/redis';
 import { logger } from '../config/logger';
 import voiceSelectorService from './voice-selector.service';
+import mongoose from 'mongoose';
 
 interface QuickProductionInput {
   userId: string;
@@ -38,30 +41,28 @@ export class ProductionOrchestrator {
 
     try {
       // Create a project for this production
-      const project = await prisma.project.create({
-        data: {
-          userId,
-          name: `Quick Production - ${new Date().toLocaleDateString()}`,
-          description: prompt,
-          status: 'ACTIVE',
-        },
+      const project = new Project({
+        userId: new mongoose.Types.ObjectId(userId),
+        name: `Quick Production - ${new Date().toLocaleDateString()}`,
+        description: prompt,
+        status: 'ACTIVE',
       });
+      await project.save();
 
       // Create production record to track progress
-      const production = await prisma.production.create({
-        data: {
-          projectId: project.id,
-          status: 'PENDING',
-          progress: 0,
-          settings: {
-            prompt,
-            voiceId,
-            duration,
-            tone,
-            automated: true,
-          } as any,
-        },
+      const production = new Production({
+        projectId: project._id,
+        status: 'PENDING',
+        progress: 0,
+        settings: {
+          prompt,
+          voiceId,
+          duration,
+          tone,
+          automated: true,
+        } as any,
       });
+      await production.save();
 
       // Start the pipeline asynchronously
       this.runPipeline(production.id, project.id, userId, prompt, voiceId, duration, tone).catch((error) => {
@@ -115,7 +116,7 @@ export class ProductionOrchestrator {
         throw new Error('Script generation failed - no script ID returned');
       }
 
-      const script = await prisma.script.findUnique({ where: { id: scriptResult.scriptId } });
+      const script = await Script.findById(scriptResult.scriptId);
       if (!script) {
         throw new Error('Script not found after generation');
       }
@@ -124,9 +125,8 @@ export class ProductionOrchestrator {
       await this.updateProductionStatus(productionId, 'GENERATING_VOICE', 25, 'Script generated! Selecting perfect voice...');
 
       // Update production with script ID
-      await prisma.production.update({
-        where: { id: productionId },
-        data: { scriptId: script.id },
+      await Production.findByIdAndUpdate(productionId, {
+        scriptId: script._id,
       });
 
       // Intelligent Voice Selection - analyze user prompt first, then script
@@ -208,9 +208,8 @@ export class ProductionOrchestrator {
       await this.updateProductionStatus(productionId, 'MIXING', 70, 'Music generated! Mixing audio...');
 
       // Update production with music ID
-      await prisma.production.update({
-        where: { id: productionId },
-        data: { musicId: musicResult.musicId },
+      await Production.findByIdAndUpdate(productionId, {
+        musicId: new mongoose.Types.ObjectId(musicResult.musicId),
       });
 
       // Stage 4: Mix Audio
@@ -239,14 +238,11 @@ export class ProductionOrchestrator {
       logger.info(`[Pipeline ${productionId}] Audio mixed successfully: ${mixingResult.outputUrl}`);
 
       // Final: Update production as completed
-      await prisma.production.update({
-        where: { id: productionId },
-        data: {
-          status: 'COMPLETED',
-          progress: 100,
-          outputUrl: mixingResult.outputUrl,
-          duration: mixingResult.duration,
-        },
+      await Production.findByIdAndUpdate(productionId, {
+        status: 'COMPLETED',
+        progress: 100,
+        outputUrl: mixingResult.outputUrl,
+        duration: mixingResult.duration,
       });
 
       logger.info(`[Pipeline ${productionId}] ✓ Production completed successfully!`);
@@ -267,13 +263,10 @@ export class ProductionOrchestrator {
    * Get production progress
    */
   async getProductionProgress(productionId: string): Promise<ProductionProgress> {
-    const production = await prisma.production.findUnique({
-      where: { id: productionId },
-      include: {
-        script: true,
-        music: true,
-      },
-    });
+    const production = await Production.findById(productionId)
+      .populate('scriptId')
+      .populate('musicId')
+      .exec();
 
     if (!production) {
       throw new Error('Production not found');
@@ -292,8 +285,8 @@ export class ProductionOrchestrator {
       stage: stageMap[production.status] || 'script',
       progress: production.progress,
       message: this.getStatusMessage(production.status, production.progress),
-      scriptId: production.scriptId || undefined,
-      musicId: production.musicId || undefined,
+      scriptId: production.scriptId?.toString(),
+      musicId: production.musicId?.toString(),
       productionId: production.id,
       outputUrl: production.outputUrl || undefined,
     };
@@ -308,13 +301,10 @@ export class ProductionOrchestrator {
     progress: number,
     message: string
   ): Promise<void> {
-    await prisma.production.update({
-      where: { id: productionId },
-      data: {
-        status: status as any,
-        progress,
-        errorMessage: status === 'FAILED' ? message : null,
-      },
+    await Production.findByIdAndUpdate(productionId, {
+      status: status as any,
+      progress,
+      errorMessage: status === 'FAILED' ? message : null,
     });
   }
 

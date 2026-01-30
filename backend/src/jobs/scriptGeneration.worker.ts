@@ -1,9 +1,12 @@
 import { Worker, Job } from 'bullmq';
 import { scriptGenerationQueue } from '../config/redis';
-import prisma from '../config/database';
+import { Script } from '../models/Script';
+import { Job as JobModel } from '../models/Job';
+import { UsageRecord } from '../models/UsageRecord';
 import openAIService from '../services/llm/openai.service';
 import { logger } from '../config/logger';
 import redisConnection from '../config/redis';
+import mongoose from 'mongoose';
 
 interface ScriptGenerationJobData {
   userId: string;
@@ -47,38 +50,36 @@ const processScriptGeneration = async (job: Job<ScriptGenerationJobData>) => {
     await job.updateProgress(70);
 
     // Save script to database
-    const script = await prisma.script.create({
-      data: {
-        projectId,
-        title: `Generated Script - ${new Date().toLocaleString()}`,
-        content: generatedContent,
-        metadata: {
-          prompt,
-          tone,
-          length,
-          targetAudience,
-          productName,
-          generatedAt: new Date().toISOString(),
-          jobId: job.id,
-        },
+    const script = new Script({
+      projectId: new mongoose.Types.ObjectId(projectId),
+      title: `Generated Script - ${new Date().toLocaleString()}`,
+      content: generatedContent,
+      metadata: {
+        prompt,
+        tone,
+        length,
+        targetAudience,
+        productName,
+        generatedAt: new Date().toISOString(),
+        jobId: job.id,
       },
     });
+    await script.save();
 
     await job.updateProgress(90);
 
     // Track usage
-    await prisma.usageRecord.create({
-      data: {
-        userId,
-        resourceType: 'SCRIPT_GENERATION',
-        quantity: 1,
-        metadata: {
-          scriptId: script.id,
-          promptLength: prompt.length,
-          jobId: job.id,
-        },
+    const usageRecord = new UsageRecord({
+      userId: new mongoose.Types.ObjectId(userId),
+      resourceType: 'SCRIPT_GENERATION',
+      quantity: 1,
+      metadata: {
+        scriptId: script.id,
+        promptLength: prompt.length,
+        jobId: job.id,
       },
     });
+    await usageRecord.save();
 
     await job.updateProgress(100);
 
@@ -98,15 +99,14 @@ const processScriptGeneration = async (job: Job<ScriptGenerationJobData>) => {
     });
 
     // Create a job record in database for tracking
-    await prisma.job.create({
-      data: {
-        type: 'SCRIPT_GENERATION',
-        payload: job.data as any,
-        status: 'FAILED',
-        errorMessage: error.message,
-        attempts: job.attemptsMade,
-      },
+    const jobRecord = new JobModel({
+      type: 'SCRIPT_GENERATION',
+      payload: job.data as any,
+      status: 'FAILED',
+      errorMessage: error.message,
+      attempts: job.attemptsMade,
     });
+    await jobRecord.save();
 
     throw error;
   }

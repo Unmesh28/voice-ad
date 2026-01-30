@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import prisma from '../config/database';
+import { User } from '../models/User';
+import { UsageRecord, ResourceType } from '../models/UsageRecord';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { hashPassword } from '../utils/password';
 
@@ -8,7 +9,7 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError('User not authenticated', 401);
   }
 
-  const { passwordHash: _, ...userWithoutPassword } = req.user;
+  const { password: _, ...userWithoutPassword } = req.user.toObject();
 
   res.json({
     success: true,
@@ -23,15 +24,20 @@ export const updateProfile = asyncHandler(async (req: Request, res: Response) =>
 
   const { firstName, lastName } = req.body;
 
-  const updatedUser = await prisma.user.update({
-    where: { id: req.user.id },
-    data: {
+  const updatedUser = await User.findByIdAndUpdate(
+    req.user._id,
+    {
       firstName,
       lastName,
     },
-  });
+    { new: true }
+  );
 
-  const { passwordHash: _, ...userWithoutPassword } = updatedUser;
+  if (!updatedUser) {
+    throw new AppError('User not found', 404);
+  }
+
+  const { password: _, ...userWithoutPassword } = updatedUser.toObject();
 
   res.json({
     success: true,
@@ -48,20 +54,17 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
 
   // Verify current password
   const { comparePassword } = await import('../utils/password');
-  const isValid = await comparePassword(currentPassword, req.user.passwordHash);
+  const isValid = await comparePassword(currentPassword, req.user.password);
 
   if (!isValid) {
     throw new AppError('Current password is incorrect', 400);
   }
 
   // Hash new password
-  const passwordHash = await hashPassword(newPassword);
+  const password = await hashPassword(newPassword);
 
   // Update password
-  await prisma.user.update({
-    where: { id: req.user.id },
-    data: { passwordHash },
-  });
+  await User.findByIdAndUpdate(req.user._id, { password });
 
   res.json({
     success: true,
@@ -74,16 +77,20 @@ export const getUsageStats = asyncHandler(async (req: Request, res: Response) =>
     throw new AppError('User not authenticated', 401);
   }
 
-  const stats = await prisma.usageRecord.groupBy({
-    by: ['resourceType'],
-    where: {
-      userId: req.user.id,
+  const stats = await UsageRecord.aggregate([
+    {
+      $match: {
+        userId: req.user._id,
+      },
     },
-    _sum: {
-      quantity: true,
-      cost: true,
+    {
+      $group: {
+        _id: '$resourceType',
+        totalQuantity: { $sum: '$quantity' },
+        totalCost: { $sum: '$cost' },
+      },
     },
-  });
+  ]);
 
   const formattedStats = {
     ttsCharacters: 0,
@@ -94,21 +101,21 @@ export const getUsageStats = asyncHandler(async (req: Request, res: Response) =>
   };
 
   stats.forEach((stat) => {
-    switch (stat.resourceType) {
-      case 'TTS_CHARACTERS':
-        formattedStats.ttsCharacters = stat._sum.quantity || 0;
+    switch (stat._id) {
+      case ResourceType.TTS_CHARACTERS:
+        formattedStats.ttsCharacters = stat.totalQuantity || 0;
         break;
-      case 'MUSIC_GENERATION':
-        formattedStats.musicGenerations = stat._sum.quantity || 0;
+      case ResourceType.MUSIC_GENERATION:
+        formattedStats.musicGenerations = stat.totalQuantity || 0;
         break;
-      case 'SCRIPT_GENERATION':
-        formattedStats.scriptGenerations = stat._sum.quantity || 0;
+      case ResourceType.SCRIPT_GENERATION:
+        formattedStats.scriptGenerations = stat.totalQuantity || 0;
         break;
-      case 'AUDIO_MIXING':
-        formattedStats.audioMixings = stat._sum.quantity || 0;
+      case ResourceType.AUDIO_MIXING:
+        formattedStats.audioMixings = stat.totalQuantity || 0;
         break;
     }
-    formattedStats.totalCost += stat._sum.cost || 0;
+    formattedStats.totalCost += stat.totalCost || 0;
   });
 
   res.json({

@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
-import prisma from '../config/database';
+import { Project } from '../models/Project';
+import { Script } from '../models/Script';
+import { UsageRecord } from '../models/UsageRecord';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import openAIService from '../services/llm/openai.service';
 import { scriptGenerationQueue } from '../config/redis';
@@ -17,11 +19,9 @@ export const generateScript = asyncHandler(async (req: Request, res: Response) =
     req.body;
 
   // Verify project exists and belongs to user
-  const project = await prisma.project.findFirst({
-    where: {
-      id: projectId,
-      userId: req.user.id,
-    },
+  const project = await Project.findOne({
+    _id: projectId,
+    userId: req.user._id,
   });
 
   if (!project) {
@@ -30,7 +30,7 @@ export const generateScript = asyncHandler(async (req: Request, res: Response) =
 
   // Add job to queue for async processing
   const job = await scriptGenerationQueue.add('generate-script', {
-    userId: req.user.id,
+    userId: req.user._id.toString(),
     projectId,
     prompt,
     tone,
@@ -63,11 +63,9 @@ export const generateScriptSync = asyncHandler(async (req: Request, res: Respons
     req.body;
 
   // Verify project exists and belongs to user
-  const project = await prisma.project.findFirst({
-    where: {
-      id: projectId,
-      userId: req.user.id,
-    },
+  const project = await Project.findOne({
+    _id: projectId,
+    userId: req.user._id,
   });
 
   if (!project) {
@@ -85,36 +83,32 @@ export const generateScriptSync = asyncHandler(async (req: Request, res: Respons
   });
 
   // Save script to database
-  const script = await prisma.script.create({
-    data: {
-      projectId,
-      title: title || `Generated Script - ${new Date().toLocaleString()}`,
-      content: generatedContent,
-      metadata: {
-        prompt,
-        tone,
-        length,
-        targetAudience,
-        productName,
-        generatedAt: new Date().toISOString(),
-      },
+  const script = await Script.create({
+    projectId,
+    title: title || `Generated Script - ${new Date().toLocaleString()}`,
+    content: generatedContent,
+    metadata: {
+      prompt,
+      tone,
+      length,
+      targetAudience,
+      productName,
+      generatedAt: new Date().toISOString(),
     },
   });
 
   // Track usage
-  await prisma.usageRecord.create({
-    data: {
-      userId: req.user.id,
-      resourceType: 'SCRIPT_GENERATION',
-      quantity: 1,
-      metadata: {
-        scriptId: script.id,
-        promptLength: prompt.length,
-      },
+  await UsageRecord.create({
+    userId: req.user._id,
+    resourceType: 'SCRIPT_GENERATION',
+    quantity: 1,
+    metadata: {
+      scriptId: script._id.toString(),
+      promptLength: prompt.length,
     },
   });
 
-  logger.info(`Script generated successfully: ${script.id}`);
+  logger.info(`Script generated successfully: ${script._id}`);
 
   res.status(201).json({
     success: true,
@@ -133,27 +127,23 @@ export const createScript = asyncHandler(async (req: Request, res: Response) => 
   const { projectId, title, content, metadata } = req.body;
 
   // Verify project exists and belongs to user
-  const project = await prisma.project.findFirst({
-    where: {
-      id: projectId,
-      userId: req.user.id,
-    },
+  const project = await Project.findOne({
+    _id: projectId,
+    userId: req.user._id,
   });
 
   if (!project) {
     throw new AppError('Project not found or access denied', 404);
   }
 
-  const script = await prisma.script.create({
-    data: {
-      projectId,
-      title,
-      content,
-      metadata,
-    },
+  const script = await Script.create({
+    projectId,
+    title,
+    content,
+    metadata,
   });
 
-  logger.info(`Script created: ${script.id}`);
+  logger.info(`Script created: ${script._id}`);
 
   res.status(201).json({
     success: true,
@@ -175,11 +165,9 @@ export const getScripts = asyncHandler(async (req: Request, res: Response) => {
 
   if (projectId) {
     // Verify project access
-    const project = await prisma.project.findFirst({
-      where: {
-        id: projectId as string,
-        userId: req.user.id,
-      },
+    const project = await Project.findOne({
+      _id: projectId as string,
+      userId: req.user._id,
     });
 
     if (!project) {
@@ -189,34 +177,31 @@ export const getScripts = asyncHandler(async (req: Request, res: Response) => {
     where.projectId = projectId;
   } else {
     // Get all scripts from user's projects
-    const userProjects = await prisma.project.findMany({
-      where: { userId: req.user.id },
-      select: { id: true },
-    });
+    const userProjects = await Project.find(
+      { userId: req.user._id },
+      { _id: 1 }
+    ).lean();
 
     where.projectId = {
-      in: userProjects.map((p) => p.id),
+      $in: userProjects.map((p) => p._id),
     };
   }
 
-  const scripts = await prisma.script.findMany({
-    where,
-    include: {
-      project: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-    },
-    orderBy: {
-      createdAt: 'desc',
-    },
-  });
+  const scripts = await Script.find(where)
+    .populate('projectId', '_id name')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  // Transform the populated field to match expected format
+  const scriptsWithProject = scripts.map((script: any) => ({
+    ...script,
+    project: script.projectId,
+    projectId: script.projectId?._id,
+  }));
 
   res.json({
     success: true,
-    data: scripts,
+    data: scriptsWithProject,
   });
 });
 
@@ -230,30 +215,30 @@ export const getScript = asyncHandler(async (req: Request, res: Response) => {
 
   const { id } = req.params;
 
-  const script = await prisma.script.findFirst({
-    where: {
-      id,
-      project: {
-        userId: req.user.id,
-      },
-    },
-    include: {
-      project: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-    },
-  });
+  const script = await Script.findById(id)
+    .populate('projectId', '_id name userId')
+    .lean();
 
   if (!script) {
     throw new AppError('Script not found or access denied', 404);
   }
 
+  // Check if the project belongs to the user
+  const project = script.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
+    throw new AppError('Script not found or access denied', 404);
+  }
+
+  // Transform the populated field to match expected format
+  const scriptWithProject = {
+    ...script,
+    project: { _id: project._id, name: project.name },
+    projectId: project._id,
+  };
+
   res.json({
     success: true,
-    data: script,
+    data: scriptWithProject,
   });
 });
 
@@ -269,33 +254,33 @@ export const updateScript = asyncHandler(async (req: Request, res: Response) => 
   const { title, content, metadata } = req.body;
 
   // Verify script exists and belongs to user
-  const existingScript = await prisma.script.findFirst({
-    where: {
-      id,
-      project: {
-        userId: req.user.id,
-      },
-    },
-  });
+  const existingScript = await Script.findById(id)
+    .populate('projectId', 'userId')
+    .lean();
 
   if (!existingScript) {
     throw new AppError('Script not found or access denied', 404);
   }
 
-  // Update script and increment version
-  const script = await prisma.script.update({
-    where: { id },
-    data: {
-      title,
-      content,
-      metadata,
-      version: {
-        increment: 1,
-      },
-    },
-  });
+  const project = existingScript.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
+    throw new AppError('Script not found or access denied', 404);
+  }
 
-  logger.info(`Script updated: ${script.id}, version: ${script.version}`);
+  // Update script and increment version
+  const updateData: any = {};
+  if (title !== undefined) updateData.title = title;
+  if (content !== undefined) updateData.content = content;
+  if (metadata !== undefined) updateData.metadata = metadata;
+  updateData.$inc = { version: 1 };
+
+  const script = await Script.findByIdAndUpdate(
+    id,
+    updateData,
+    { new: true }
+  );
+
+  logger.info(`Script updated: ${script?._id}, version: ${script?.version}`);
 
   res.json({
     success: true,
@@ -314,22 +299,20 @@ export const deleteScript = asyncHandler(async (req: Request, res: Response) => 
   const { id } = req.params;
 
   // Verify script exists and belongs to user
-  const script = await prisma.script.findFirst({
-    where: {
-      id,
-      project: {
-        userId: req.user.id,
-      },
-    },
-  });
+  const script = await Script.findById(id)
+    .populate('projectId', 'userId')
+    .lean();
 
   if (!script) {
     throw new AppError('Script not found or access denied', 404);
   }
 
-  await prisma.script.delete({
-    where: { id },
-  });
+  const project = script.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
+    throw new AppError('Script not found or access denied', 404);
+  }
+
+  await Script.findByIdAndDelete(id);
 
   logger.info(`Script deleted: ${id}`);
 
@@ -351,16 +334,16 @@ export const refineScript = asyncHandler(async (req: Request, res: Response) => 
   const { improvementRequest } = req.body;
 
   // Verify script exists and belongs to user
-  const script = await prisma.script.findFirst({
-    where: {
-      id,
-      project: {
-        userId: req.user.id,
-      },
-    },
-  });
+  const script = await Script.findById(id)
+    .populate('projectId', 'userId')
+    .lean();
 
   if (!script) {
+    throw new AppError('Script not found or access denied', 404);
+  }
+
+  const project = script.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
     throw new AppError('Script not found or access denied', 404);
   }
 
@@ -368,13 +351,11 @@ export const refineScript = asyncHandler(async (req: Request, res: Response) => 
   const refinedContent = await openAIService.refineScript(script.content, improvementRequest);
 
   // Update script
-  const updatedScript = await prisma.script.update({
-    where: { id },
-    data: {
+  const updatedScript = await Script.findByIdAndUpdate(
+    id,
+    {
       content: refinedContent,
-      version: {
-        increment: 1,
-      },
+      $inc: { version: 1 },
       metadata: {
         ...(script.metadata as object),
         lastRefinement: {
@@ -383,22 +364,21 @@ export const refineScript = asyncHandler(async (req: Request, res: Response) => 
         },
       },
     },
-  });
+    { new: true }
+  );
 
   // Track usage
-  await prisma.usageRecord.create({
-    data: {
-      userId: req.user.id,
-      resourceType: 'SCRIPT_GENERATION',
-      quantity: 1,
-      metadata: {
-        scriptId: script.id,
-        action: 'refinement',
-      },
+  await UsageRecord.create({
+    userId: req.user._id,
+    resourceType: 'SCRIPT_GENERATION',
+    quantity: 1,
+    metadata: {
+      scriptId: script._id.toString(),
+      action: 'refinement',
     },
   });
 
-  logger.info(`Script refined: ${script.id}`);
+  logger.info(`Script refined: ${script._id}`);
 
   res.json({
     success: true,
@@ -417,11 +397,9 @@ export const generateVariations = asyncHandler(async (req: Request, res: Respons
   const { projectId, prompt, tone, length, targetAudience, productName, count } = req.body;
 
   // Verify project exists and belongs to user
-  const project = await prisma.project.findFirst({
-    where: {
-      id: projectId,
-      userId: req.user.id,
-    },
+  const project = await Project.findOne({
+    _id: projectId,
+    userId: req.user._id,
   });
 
   if (!project) {
@@ -443,35 +421,31 @@ export const generateVariations = asyncHandler(async (req: Request, res: Respons
   // Save all variations as separate scripts
   const savedScripts = await Promise.all(
     variations.map((content, index) =>
-      prisma.script.create({
-        data: {
-          projectId,
-          title: `Variation ${index + 1} - ${new Date().toLocaleString()}`,
-          content,
-          metadata: {
-            prompt,
-            tone,
-            length,
-            targetAudience,
-            isVariation: true,
-            variationNumber: index + 1,
-            generatedAt: new Date().toISOString(),
-          },
+      Script.create({
+        projectId,
+        title: `Variation ${index + 1} - ${new Date().toLocaleString()}`,
+        content,
+        metadata: {
+          prompt,
+          tone,
+          length,
+          targetAudience,
+          isVariation: true,
+          variationNumber: index + 1,
+          generatedAt: new Date().toISOString(),
         },
       })
     )
   );
 
   // Track usage
-  await prisma.usageRecord.create({
-    data: {
-      userId: req.user.id,
-      resourceType: 'SCRIPT_GENERATION',
-      quantity: variations.length,
-      metadata: {
-        action: 'variations',
-        count: variations.length,
-      },
+  await UsageRecord.create({
+    userId: req.user._id,
+    resourceType: 'SCRIPT_GENERATION',
+    quantity: variations.length,
+    metadata: {
+      action: 'variations',
+      count: variations.length,
     },
   });
 
