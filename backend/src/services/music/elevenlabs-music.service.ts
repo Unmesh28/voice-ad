@@ -96,7 +96,8 @@ class ElevenLabsMusicService {
    */
   async saveAudioToFile(audioBuffer: Buffer, filename: string): Promise<string> {
     try {
-      const uploadDir = process.env.UPLOAD_DIR || './uploads';
+      // Use absolute path for uploads directory
+      const uploadDir = path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads');
       const musicDir = path.join(uploadDir, 'music');
 
       // Create directory if it doesn't exist

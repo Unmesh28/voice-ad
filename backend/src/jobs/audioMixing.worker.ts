@@ -73,8 +73,8 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     const music = production.musicId as any;
     const musicAudioUrl = music?.fileUrl;
 
-    // Prepare file paths
-    const uploadDir = process.env.UPLOAD_DIR || './uploads';
+    // Prepare file paths - use absolute path for uploads directory
+    const uploadDir = path.join(process.cwd(), process.env.UPLOAD_DIR || 'uploads');
     const voicePath = voiceAudioUrl ? path.join(uploadDir, voiceAudioUrl.replace('/uploads/', '')) : undefined;
     const musicPath = musicAudioUrl ? path.join(uploadDir, musicAudioUrl.replace('/uploads/', '')) : undefined;
 
