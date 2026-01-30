@@ -64,7 +64,7 @@ const Dashboard = () => {
         </Typography>
       </Box>
 
-      <Grid container spacing={{ xs: 2, sm: 3, md: 4 }} sx={{ mt: 1 }}>
+      <Grid container spacing={{ xs: 2, sm: 2.5, md: 3 }} sx={{ mt: 1 }} justifyContent="center">
         {cards.map((card, index) => (
           <Grid item xs={12} sm={6} md={4} lg={2.4} key={index}>
             <Paper
