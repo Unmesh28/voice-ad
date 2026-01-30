@@ -137,22 +137,28 @@ Respond ONLY with valid JSON, no additional text.`;
   /**
    * Analyze script content to determine appropriate voice characteristics
    */
-  async analyzeScript(scriptContent: string): Promise<ScriptAnalysis> {
+  async analyzeScript(scriptContent: string, userPreferences?: PromptVoicePreference): Promise<ScriptAnalysis> {
     try {
       logger.info('Analyzing script for voice selection');
 
-      const prompt = `Analyze this advertisement script and determine the ideal voice characteristics.
+      const userConstraints = userPreferences?.hasPreference
+        ? `\nUser explicitly requested: ${userPreferences.gender ? `${userPreferences.gender} voice, ` : ''}${userPreferences.accent ? `${userPreferences.accent} accent, ` : ''}${userPreferences.tone ? `${userPreferences.tone} tone` : ''}`
+        : '';
+
+      const prompt = `Analyze this advertisement script and determine the ideal voice characteristics.${userConstraints}
 
 Script:
 ${scriptContent}
 
-Based on this script, provide a JSON response with these fields:
+Based on this script${userPreferences?.hasPreference ? ' and user preferences' : ''}, provide a JSON response with these fields:
 - tone: The overall tone (professional, friendly, energetic, calm, exciting, authoritative, warm, etc.)
-- gender: Preferred gender (male, female, neutral)
+- gender: Preferred gender (male, female, neutral)${userPreferences?.gender ? ` - USER REQUESTED: ${userPreferences.gender}` : ''}
 - ageRange: Age range (young, middle-aged, mature)
 - style: Speaking style (conversational, formal, dramatic, casual)
 - pace: Speaking pace (fast, moderate, slow)
 - emotion: Primary emotion (excited, calm, serious, playful, confident, etc.)
+
+Important: If user specified gender, tone, or other preferences, ALWAYS use those values.
 
 Respond ONLY with valid JSON, no additional text.`;
 
@@ -224,8 +230,8 @@ Respond ONLY with valid JSON, no additional text.`;
         promptPreferences = await this.analyzePromptForVoicePreferences(userPrompt);
       }
 
-      // Step 2: Analyze the script
-      const analysis = await this.analyzeScript(scriptContent);
+      // Step 2: Analyze the script (with user preferences to guide the analysis)
+      const analysis = await this.analyzeScript(scriptContent, promptPreferences || undefined);
 
       // Step 3: Get available voices from ElevenLabs
       const voices = await elevenLabsService.getVoices();
@@ -246,11 +252,18 @@ Respond ONLY with valid JSON, no additional text.`;
           if (voice.labels) {
             const labels = voice.labels;
 
-            // Match gender (highest priority if specified)
-            if (promptPreferences.gender &&
-                labels.gender?.toLowerCase().includes(promptPreferences.gender.toLowerCase())) {
-              score += 50;
-              reasons.push(`user requested ${promptPreferences.gender}`);
+            // Match gender (highest priority if specified) - must be EXACT match
+            if (promptPreferences.gender && labels.gender) {
+              const voiceGender = labels.gender.toLowerCase();
+              const requestedGender = promptPreferences.gender.toLowerCase();
+
+              if (voiceGender === requestedGender || voiceGender.includes(requestedGender)) {
+                score += 50;
+                reasons.push(`user requested ${promptPreferences.gender}`);
+              } else {
+                // PENALTY for wrong gender if user explicitly requested it
+                score -= 100;
+              }
             }
 
             // Match age preference
