@@ -102,8 +102,8 @@ class ElevenLabsService {
       text,
       modelId = 'eleven_v3', // Eleven V3 Alpha: Most emotionally expressive model, supports 70+ languages
       voiceSettings = {
-        stability: 0.5,
-        similarity_boost: 0.8, // Increased for better voice matching in v3
+        stability: 0.5, // V3 requires: 0.0 (Creative), 0.5 (Natural), or 1.0 (Robust)
+        similarity_boost: 0.75,
         style: 0.0,
         use_speaker_boost: true,
       },
@@ -246,11 +246,22 @@ class ElevenLabsService {
   }
 
   /**
-   * Validate voice settings
+   * Validate voice settings for Eleven V3
+   * V3 requires stability to be exactly 0.0, 0.5, or 1.0
    */
   validateVoiceSettings(settings: VoiceSettings): VoiceSettings {
+    // Round stability to nearest valid V3 value: 0.0, 0.5, or 1.0
+    let stability = settings.stability || 0.5;
+    if (stability < 0.25) {
+      stability = 0.0; // Creative
+    } else if (stability < 0.75) {
+      stability = 0.5; // Natural (default)
+    } else {
+      stability = 1.0; // Robust
+    }
+
     return {
-      stability: Math.max(0, Math.min(1, settings.stability || 0.5)),
+      stability,
       similarity_boost: Math.max(0, Math.min(1, settings.similarity_boost || 0.75)),
       style: Math.max(0, Math.min(1, settings.style || 0.0)),
       use_speaker_boost: settings.use_speaker_boost !== false,
