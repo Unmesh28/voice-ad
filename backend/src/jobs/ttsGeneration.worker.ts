@@ -1,10 +1,13 @@
 import { Worker, Job } from 'bullmq';
 import { ttsGenerationQueue } from '../config/redis';
-import prisma from '../config/database';
+import { Script } from '../models/Script';
+import { Job as JobModel } from '../models/Job';
+import { UsageRecord } from '../models/UsageRecord';
 import elevenLabsService from '../services/tts/elevenlabs.service';
 import { logger } from '../config/logger';
 import redisConnection from '../config/redis';
 import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
 
 interface TTSGenerationJobData {
   userId: string;
@@ -35,19 +38,17 @@ const processTTSGeneration = async (job: Job<TTSGenerationJobData>) => {
     await job.updateProgress(10);
 
     // Get script
-    const script = await prisma.script.findFirst({
-      where: {
-        id: scriptId,
-        project: {
-          userId,
-        },
-      },
-      include: {
-        project: true,
-      },
-    });
+    const script = await Script.findById(scriptId)
+      .populate('projectId')
+      .exec();
 
     if (!script) {
+      throw new Error('Script not found');
+    }
+
+    // Verify the script's project belongs to the user
+    const project = script.projectId as any;
+    if (!project || project.userId.toString() !== userId) {
       throw new Error('Script not found or access denied');
     }
 
@@ -83,38 +84,33 @@ const processTTSGeneration = async (job: Job<TTSGenerationJobData>) => {
     const audioUrl = `/uploads/audio/${filename}`;
 
     // Update script metadata with audio info
-    await prisma.script.update({
-      where: { id: script.id },
-      data: {
-        metadata: {
-          ...(script.metadata as object),
-          lastTTS: {
-            voiceId,
-            voiceSettings: settings as any,
-            audioUrl,
-            characterCount,
-            estimatedDuration,
-            generatedAt: new Date().toISOString(),
-            jobId: job.id,
-          },
-        } as any,
+    script.metadata = {
+      ...(script.metadata as object),
+      lastTTS: {
+        voiceId,
+        voiceSettings: settings as any,
+        audioUrl,
+        characterCount,
+        estimatedDuration,
+        generatedAt: new Date().toISOString(),
+        jobId: job.id,
       },
-    });
+    };
+    await script.save();
 
     // Track usage
-    await prisma.usageRecord.create({
-      data: {
-        userId,
-        resourceType: 'TTS_CHARACTERS',
-        quantity: characterCount,
-        metadata: {
-          scriptId: script.id,
-          voiceId,
-          duration: estimatedDuration,
-          jobId: job.id,
-        },
+    const usageRecord = new UsageRecord({
+      userId: new mongoose.Types.ObjectId(userId),
+      resourceType: 'TTS_CHARACTERS',
+      quantity: characterCount,
+      metadata: {
+        scriptId: script.id,
+        voiceId,
+        duration: estimatedDuration,
+        jobId: job.id,
       },
     });
+    await usageRecord.save();
 
     await job.updateProgress(100);
 
@@ -138,15 +134,14 @@ const processTTSGeneration = async (job: Job<TTSGenerationJobData>) => {
     });
 
     // Create a job record in database for tracking
-    await prisma.job.create({
-      data: {
-        type: 'TTS_GENERATION',
-        payload: job.data as any,
-        status: 'FAILED',
-        errorMessage: error.message,
-        attempts: job.attemptsMade,
-      },
+    const jobRecord = new JobModel({
+      type: 'TTS_GENERATION',
+      payload: job.data as any,
+      status: 'FAILED',
+      errorMessage: error.message,
+      attempts: job.attemptsMade,
     });
+    await jobRecord.save();
 
     throw error;
   }

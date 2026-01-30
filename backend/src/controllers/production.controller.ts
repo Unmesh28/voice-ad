@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
-import prisma from '../config/database';
+import { Project } from '../models/Project';
+import { Production } from '../models/Production';
+import { Script } from '../models/Script';
+import { MusicTrack } from '../models/MusicTrack';
+import { UsageRecord } from '../models/UsageRecord';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import ffmpegService from '../services/audio/ffmpeg.service';
 import { audioMixingQueue } from '../config/redis';
@@ -19,11 +23,9 @@ export const createProduction = asyncHandler(async (req: Request, res: Response)
   const { projectId, scriptId, voiceId, musicId, settings } = req.body;
 
   // Verify project exists and belongs to user
-  const project = await prisma.project.findFirst({
-    where: {
-      id: projectId,
-      userId: req.user.id,
-    },
+  const project = await Project.findOne({
+    _id: projectId,
+    userId: req.user._id,
   });
 
   if (!project) {
@@ -31,19 +33,17 @@ export const createProduction = asyncHandler(async (req: Request, res: Response)
   }
 
   // Create production
-  const production = await prisma.production.create({
-    data: {
-      projectId,
-      scriptId: scriptId || null,
-      voiceId: voiceId || null,
-      musicId: musicId || null,
-      status: 'PENDING',
-      settings: settings || {},
-      progress: 0,
-    },
+  const production = await Production.create({
+    projectId,
+    scriptId: scriptId || undefined,
+    voiceId: voiceId || undefined,
+    musicId: musicId || undefined,
+    status: 'PENDING',
+    settings: settings || {},
+    progress: 0,
   });
 
-  logger.info(`Production created: ${production.id}`);
+  logger.info(`Production created: ${production._id}`);
 
   res.status(201).json({
     success: true,
@@ -62,27 +62,25 @@ export const mixProduction = asyncHandler(async (req: Request, res: Response) =>
   const { id } = req.params;
 
   // Verify production exists and belongs to user
-  const production = await prisma.production.findFirst({
-    where: {
-      id,
-      project: {
-        userId: req.user.id,
-      },
-    },
-    include: {
-      script: true,
-      music: true,
-    },
-  });
+  const production = await Production.findById(id)
+    .populate('projectId', 'userId')
+    .populate('scriptId')
+    .populate('musicId')
+    .lean();
 
   if (!production) {
     throw new AppError('Production not found or access denied', 404);
   }
 
+  const project = production.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
+    throw new AppError('Production not found or access denied', 404);
+  }
+
   // Add job to queue
   const job = await audioMixingQueue.add('mix-audio', {
-    userId: req.user.id,
-    productionId: production.id,
+    userId: req.user._id.toString(),
+    productionId: production._id.toString(),
   });
 
   logger.info(`Audio mixing job queued: ${job.id}`);
@@ -92,7 +90,7 @@ export const mixProduction = asyncHandler(async (req: Request, res: Response) =>
     message: 'Audio mixing started',
     data: {
       jobId: job.id,
-      productionId: production.id,
+      productionId: production._id,
     },
   });
 });
@@ -108,32 +106,31 @@ export const mixProductionSync = asyncHandler(async (req: Request, res: Response
   const { id } = req.params;
 
   // Verify production exists and belongs to user
-  const production = await prisma.production.findFirst({
-    where: {
-      id,
-      project: {
-        userId: req.user.id,
-      },
-    },
-    include: {
-      script: true,
-      music: true,
-    },
-  });
+  const production = await Production.findById(id)
+    .populate('projectId', 'userId')
+    .populate('scriptId')
+    .populate('musicId')
+    .lean();
 
   if (!production) {
     throw new AppError('Production not found or access denied', 404);
   }
 
+  const project = production.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
+    throw new AppError('Production not found or access denied', 404);
+  }
+
   // Update status
-  await prisma.production.update({
-    where: { id: production.id },
-    data: { status: 'MIXING', progress: 10 },
+  await Production.findByIdAndUpdate(id, {
+    status: 'MIXING',
+    progress: 10,
   });
 
   try {
     // Get voice audio URL from script metadata
-    const scriptMetadata = production.script?.metadata as any;
+    const script = production.scriptId as any;
+    const scriptMetadata = script?.metadata as any;
     const voiceAudioUrl = scriptMetadata?.lastTTS?.audioUrl;
 
     if (!voiceAudioUrl) {
@@ -141,7 +138,8 @@ export const mixProductionSync = asyncHandler(async (req: Request, res: Response
     }
 
     // Get music audio URL
-    const musicAudioUrl = production.music?.fileUrl;
+    const music = production.musicId as any;
+    const musicAudioUrl = music?.fileUrl;
 
     // Prepare file paths
     const uploadDir = process.env.UPLOAD_DIR || './uploads';
@@ -158,7 +156,7 @@ export const mixProductionSync = asyncHandler(async (req: Request, res: Response
     const outputFormat = settings.outputFormat || 'mp3';
 
     // Generate output filename
-    const filename = `production_${production.id}_${uuidv4()}.${outputFormat}`;
+    const filename = `production_${production._id}_${uuidv4()}.${outputFormat}`;
     const outputPath = path.join(uploadDir, 'productions', filename);
 
     // Ensure productions directory exists
@@ -169,10 +167,7 @@ export const mixProductionSync = asyncHandler(async (req: Request, res: Response
     }
 
     // Update progress
-    await prisma.production.update({
-      where: { id: production.id },
-      data: { progress: 30 },
-    });
+    await Production.findByIdAndUpdate(id, { progress: 30 });
 
     // Mix audio
     await ffmpegService.mixAudio({
@@ -200,30 +195,29 @@ export const mixProductionSync = asyncHandler(async (req: Request, res: Response
     const productionUrl = `/uploads/productions/${filename}`;
 
     // Update production
-    const updatedProduction = await prisma.production.update({
-      where: { id: production.id },
-      data: {
+    const updatedProduction = await Production.findByIdAndUpdate(
+      id,
+      {
         status: 'COMPLETED',
         progress: 100,
         outputUrl: productionUrl,
         duration: Math.round(duration),
       },
-    });
+      { new: true }
+    );
 
     // Track usage
-    await prisma.usageRecord.create({
-      data: {
-        userId: req.user.id,
-        resourceType: 'AUDIO_MIXING',
-        quantity: 1,
-        metadata: {
-          productionId: production.id,
-          duration: Math.round(duration),
-        },
+    await UsageRecord.create({
+      userId: req.user._id,
+      resourceType: 'AUDIO_MIXING',
+      quantity: 1,
+      metadata: {
+        productionId: production._id.toString(),
+        duration: Math.round(duration),
       },
     });
 
-    logger.info(`Production mixed successfully: ${production.id}`);
+    logger.info(`Production mixed successfully: ${production._id}`);
 
     res.json({
       success: true,
@@ -231,12 +225,9 @@ export const mixProductionSync = asyncHandler(async (req: Request, res: Response
     });
   } catch (error: any) {
     // Update production status to failed
-    await prisma.production.update({
-      where: { id: production.id },
-      data: {
-        status: 'FAILED',
-        errorMessage: error.message,
-      },
+    await Production.findByIdAndUpdate(id, {
+      status: 'FAILED',
+      errorMessage: error.message,
     });
 
     throw error;
@@ -253,9 +244,15 @@ export const getProductions = asyncHandler(async (req: Request, res: Response) =
 
   const { projectId, status } = req.query;
 
+  // First get user's projects
+  const userProjects = await Project.find(
+    { userId: req.user._id },
+    { _id: 1 }
+  ).lean();
+
   const where: any = {
-    project: {
-      userId: req.user.id,
+    projectId: {
+      $in: userProjects.map((p) => p._id),
     },
   };
 
@@ -267,36 +264,24 @@ export const getProductions = asyncHandler(async (req: Request, res: Response) =
     where.status = status;
   }
 
-  const productions = await prisma.production.findMany({
-    where,
-    include: {
-      project: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      script: {
-        select: {
-          id: true,
-          title: true,
-        },
-      },
-      music: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-    },
-    orderBy: {
-      createdAt: 'desc',
-    },
-  });
+  const productions = await Production.find(where)
+    .populate('projectId', '_id name')
+    .populate('scriptId', '_id title')
+    .populate('musicId', '_id name')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  // Transform the populated fields to match expected format
+  const productionsWithPopulated = productions.map((production: any) => ({
+    ...production,
+    project: production.projectId,
+    script: production.scriptId,
+    music: production.musicId,
+  }));
 
   res.json({
     success: true,
-    data: productions,
+    data: productionsWithPopulated,
   });
 });
 
@@ -310,45 +295,33 @@ export const getProduction = asyncHandler(async (req: Request, res: Response) =>
 
   const { id } = req.params;
 
-  const production = await prisma.production.findFirst({
-    where: {
-      id,
-      project: {
-        userId: req.user.id,
-      },
-    },
-    include: {
-      project: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      script: {
-        select: {
-          id: true,
-          title: true,
-          content: true,
-        },
-      },
-      music: {
-        select: {
-          id: true,
-          name: true,
-          fileUrl: true,
-          duration: true,
-        },
-      },
-    },
-  });
+  const production = await Production.findById(id)
+    .populate('projectId', '_id name userId')
+    .populate('scriptId', '_id title content')
+    .populate('musicId', '_id name fileUrl duration')
+    .lean();
 
   if (!production) {
     throw new AppError('Production not found or access denied', 404);
   }
 
+  // Check if the project belongs to the user
+  const project = production.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
+    throw new AppError('Production not found or access denied', 404);
+  }
+
+  // Transform the populated fields to match expected format
+  const productionWithPopulated = {
+    ...production,
+    project: { _id: project._id, name: project.name },
+    script: production.scriptId,
+    music: production.musicId,
+  };
+
   res.json({
     success: true,
-    data: production,
+    data: productionWithPopulated,
   });
 });
 
@@ -364,32 +337,35 @@ export const updateProduction = asyncHandler(async (req: Request, res: Response)
   const { scriptId, voiceId, musicId, settings } = req.body;
 
   // Verify production exists and belongs to user
-  const existingProduction = await prisma.production.findFirst({
-    where: {
-      id,
-      project: {
-        userId: req.user.id,
-      },
-    },
-  });
+  const existingProduction = await Production.findById(id)
+    .populate('projectId', 'userId')
+    .lean();
 
   if (!existingProduction) {
     throw new AppError('Production not found or access denied', 404);
   }
 
-  const production = await prisma.production.update({
-    where: { id },
-    data: {
-      scriptId: scriptId !== undefined ? scriptId : undefined,
-      voiceId: voiceId !== undefined ? voiceId : undefined,
-      musicId: musicId !== undefined ? musicId : undefined,
-      settings: settings !== undefined ? settings : undefined,
-      status: 'PENDING', // Reset status when settings change
-      progress: 0,
-    },
-  });
+  const project = existingProduction.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
+    throw new AppError('Production not found or access denied', 404);
+  }
 
-  logger.info(`Production updated: ${production.id}`);
+  const updateData: any = {
+    status: 'PENDING', // Reset status when settings change
+    progress: 0,
+  };
+  if (scriptId !== undefined) updateData.scriptId = scriptId;
+  if (voiceId !== undefined) updateData.voiceId = voiceId;
+  if (musicId !== undefined) updateData.musicId = musicId;
+  if (settings !== undefined) updateData.settings = settings;
+
+  const production = await Production.findByIdAndUpdate(
+    id,
+    updateData,
+    { new: true }
+  );
+
+  logger.info(`Production updated: ${production?._id}`);
 
   res.json({
     success: true,
@@ -408,16 +384,16 @@ export const deleteProduction = asyncHandler(async (req: Request, res: Response)
   const { id } = req.params;
 
   // Verify production exists and belongs to user
-  const production = await prisma.production.findFirst({
-    where: {
-      id,
-      project: {
-        userId: req.user.id,
-      },
-    },
-  });
+  const production = await Production.findById(id)
+    .populate('projectId', 'userId')
+    .lean();
 
   if (!production) {
+    throw new AppError('Production not found or access denied', 404);
+  }
+
+  const project = production.projectId as any;
+  if (!project || project.userId?.toString() !== req.user._id.toString()) {
     throw new AppError('Production not found or access denied', 404);
   }
 
@@ -434,9 +410,7 @@ export const deleteProduction = asyncHandler(async (req: Request, res: Response)
   }
 
   // Delete production
-  await prisma.production.delete({
-    where: { id },
-  });
+  await Production.findByIdAndDelete(id);
 
   logger.info(`Production deleted: ${id}`);
 
@@ -461,10 +435,10 @@ export const createQuickProduction = asyncHandler(async (req: Request, res: Resp
     throw new AppError('Prompt is required', 400);
   }
 
-  logger.info(`Creating quick production for user ${req.user.id}`);
+  logger.info(`Creating quick production for user ${req.user._id}`);
 
   const productionId = await productionOrchestrator.createQuickProduction({
-    userId: req.user.id,
+    userId: req.user._id.toString(),
     prompt,
     voiceId,
     duration,

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import prisma from '../config/database';
+import { MusicTrack } from '../models/MusicTrack';
+import { UsageRecord } from '../models/UsageRecord';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import elevenLabsMusicService from '../services/music/elevenlabs-music.service';
 import { musicGenerationQueue } from '../config/redis';
@@ -22,7 +23,7 @@ export const generateMusic = asyncHandler(async (req: Request, res: Response) =>
 
   // Add job to queue for async processing
   const job = await musicGenerationQueue.add('generate-music', {
-    userId: req.user.id,
+    userId: req.user._id.toString(),
     text,
     duration_seconds,
     prompt_influence,
@@ -75,39 +76,35 @@ export const generateMusicSync = asyncHandler(async (req: Request, res: Response
   const musicUrl = `/uploads/music/${filename}`;
 
   // Save to database
-  const musicTrack = await prisma.musicTrack.create({
-    data: {
-      name: name || `Generated Music - ${new Date().toLocaleString()}`,
-      description: text,
-      genre: genre || null,
-      mood: mood || null,
-      duration,
-      fileUrl: musicUrl,
-      isGenerated: true,
-      metadata: {
-        prompt: text,
-        duration_seconds,
-        prompt_influence,
-        generatedAt: new Date().toISOString(),
-      },
+  const musicTrack = await MusicTrack.create({
+    name: name || `Generated Music - ${new Date().toLocaleString()}`,
+    description: text,
+    genre: genre || undefined,
+    mood: mood || undefined,
+    duration,
+    fileUrl: musicUrl,
+    isGenerated: true,
+    metadata: {
+      prompt: text,
+      duration_seconds,
+      prompt_influence,
+      generatedAt: new Date().toISOString(),
     },
   });
 
   // Track usage
-  await prisma.usageRecord.create({
-    data: {
-      userId: req.user.id,
-      resourceType: 'MUSIC_GENERATION',
-      quantity: 1,
-      metadata: {
-        musicId: musicTrack.id,
-        duration,
-        prompt: text,
-      },
+  await UsageRecord.create({
+    userId: req.user._id,
+    resourceType: 'MUSIC_GENERATION',
+    quantity: 1,
+    metadata: {
+      musicId: musicTrack._id.toString(),
+      duration,
+      prompt: text,
     },
   });
 
-  logger.info(`Music generated successfully: ${musicTrack.id}`);
+  logger.info(`Music generated successfully: ${musicTrack._id}`);
 
   res.status(201).json({
     success: true,
@@ -139,12 +136,7 @@ export const getMusicLibrary = asyncHandler(async (req: Request, res: Response) 
     where.isGenerated = isGenerated === 'true';
   }
 
-  const musicTracks = await prisma.musicTrack.findMany({
-    where,
-    orderBy: {
-      createdAt: 'desc',
-    },
-  });
+  const musicTracks = await MusicTrack.find(where).sort({ createdAt: -1 }).lean();
 
   res.json({
     success: true,
@@ -162,9 +154,7 @@ export const getMusicTrack = asyncHandler(async (req: Request, res: Response) =>
 
   const { id } = req.params;
 
-  const musicTrack = await prisma.musicTrack.findUnique({
-    where: { id },
-  });
+  const musicTrack = await MusicTrack.findById(id).lean();
 
   if (!musicTrack) {
     throw new AppError('Music track not found', 404);
@@ -196,19 +186,17 @@ export const uploadMusicTrack = asyncHandler(async (req: Request, res: Response)
   // Get audio duration (simplified - you might want to use a library like 'music-metadata')
   const duration = 0; // TODO: Calculate actual duration
 
-  const musicTrack = await prisma.musicTrack.create({
-    data: {
-      name,
-      description,
-      genre,
-      mood,
-      duration,
-      fileUrl: musicUrl,
-      isGenerated: false,
-    },
+  const musicTrack = await MusicTrack.create({
+    name,
+    description,
+    genre,
+    mood,
+    duration,
+    fileUrl: musicUrl,
+    isGenerated: false,
   });
 
-  logger.info(`Music uploaded: ${musicTrack.id}`);
+  logger.info(`Music uploaded: ${musicTrack._id}`);
 
   res.status(201).json({
     success: true,
@@ -226,9 +214,7 @@ export const deleteMusicTrack = asyncHandler(async (req: Request, res: Response)
 
   const { id } = req.params;
 
-  const musicTrack = await prisma.musicTrack.findUnique({
-    where: { id },
-  });
+  const musicTrack = await MusicTrack.findById(id).lean();
 
   if (!musicTrack) {
     throw new AppError('Music track not found', 404);
@@ -245,9 +231,7 @@ export const deleteMusicTrack = asyncHandler(async (req: Request, res: Response)
   }
 
   // Delete from database
-  await prisma.musicTrack.delete({
-    where: { id },
-  });
+  await MusicTrack.findByIdAndDelete(id);
 
   logger.info(`Music deleted: ${id}`);
 
