@@ -1,8 +1,13 @@
 import * as jwt from 'jsonwebtoken';
-import { User } from '@prisma/client';
 
 interface JWTPayload {
   userId: string;
+  email: string;
+  role: string;
+}
+
+interface UserForToken {
+  id: string;
   email: string;
   role: string;
 }
@@ -12,7 +17,7 @@ const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secre
 const JWT_EXPIRE = process.env.JWT_EXPIRE || '7d';
 const JWT_REFRESH_EXPIRE = process.env.JWT_REFRESH_EXPIRE || '30d';
 
-export const generateToken = (user: User): string => {
+export const generateToken = (user: UserForToken): string => {
   const payload: JWTPayload = {
     userId: user.id,
     email: user.email,
@@ -24,7 +29,7 @@ export const generateToken = (user: User): string => {
   } as jwt.SignOptions);
 };
 
-export const generateRefreshToken = (user: User): string => {
+export const generateRefreshToken = (user: UserForToken): string => {
   const payload: JWTPayload = {
     userId: user.id,
     email: user.email,

@@ -1,14 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwt';
 import { AppError } from './errorHandler';
-import prisma from '../config/database';
-import { User } from '@prisma/client';
+import { User, IUser } from '../models/User';
 
 // Extend Express Request to include user
 declare global {
   namespace Express {
     interface Request {
-      user?: User;
+      user?: IUser;
     }
   }
 }
@@ -32,9 +31,7 @@ export const authenticate = async (
     const decoded = verifyToken(token);
 
     // Get user from database
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-    });
+    const user = await User.findById(decoded.userId);
 
     if (!user) {
       throw new AppError('User not found', 401);
