@@ -140,8 +140,21 @@ export class ProductionOrchestrator {
           selectedVoiceId = voiceMatch.voiceId;
           logger.info(`[Pipeline ${productionId}] Intelligently selected voice: ${voiceMatch.name} (${voiceMatch.voiceId}) - ${voiceMatch.reason}`);
         } catch (error: any) {
-          logger.warn(`[Pipeline ${productionId}] Voice selection failed, using first available voice:`, error.message);
-          // If voice selection fails, we'll let the TTS service handle it
+          logger.warn(`[Pipeline ${productionId}] Voice selection failed, fetching first available voice:`, error.message);
+          // If voice selection fails, get the first available voice from ElevenLabs
+          try {
+            const elevenLabsService = (await import('./tts/elevenlabs.service')).default;
+            const voices = await elevenLabsService.getVoices();
+            if (voices && voices.length > 0) {
+              selectedVoiceId = voices[0].voice_id;
+              logger.info(`[Pipeline ${productionId}] Using fallback voice: ${voices[0].name} (${selectedVoiceId})`);
+            } else {
+              throw new Error('No voices available from ElevenLabs');
+            }
+          } catch (fallbackError: any) {
+            logger.error(`[Pipeline ${productionId}] Failed to get fallback voice:`, fallbackError.message);
+            throw new Error(`Voice selection failed and no fallback voice available: ${fallbackError.message}`);
+          }
         }
       }
 
