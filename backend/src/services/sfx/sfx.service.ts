@@ -222,7 +222,12 @@ class SfxService {
 
   /**
    * Extract all SFX generation inputs from an ad creative plan's segments.
-   * Convenience method that picks out sfx_hit segments and builds inputs.
+   * Extracts SFX from ANY segment that has a non-null sfx field with a
+   * description — not just sfx_hit segments. This allows SFX overlays on
+   * voiceover segments too (e.g. a cash register sound during the CTA).
+   *
+   * For sfx_hit segments, uses the segment duration as the SFX duration.
+   * For other segment types (where SFX is an overlay), caps at 2s.
    */
   extractSfxFromAdFormat(segments: {
     segmentIndex: number;
@@ -232,10 +237,12 @@ class SfxService {
     sfx: { description: string; volume?: number | null } | null;
   }[]): SfxGenerationInput[] {
     return segments
-      .filter((seg) => seg.type === 'sfx_hit' && seg.sfx?.description)
+      .filter((seg) => seg.sfx?.description)
       .map((seg) => ({
         description: seg.sfx!.description,
-        durationSeconds: seg.duration,
+        // sfx_hit segments: use the full segment duration for the SFX
+        // Other segment types: SFX is an overlay, cap at 2s
+        durationSeconds: seg.type === 'sfx_hit' ? seg.duration : Math.min(seg.duration, 2),
         segmentIndex: seg.segmentIndex,
         segmentLabel: seg.label,
       }));
