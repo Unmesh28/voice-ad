@@ -150,8 +150,8 @@ class TimelineComposerService {
       fs.mkdirSync(outputDir, { recursive: true });
     }
 
-    // 1. Compute the timeline
-    const { timeline, musicVolumeSegments, totalDuration } = this.computeTimeline(
+    // 1. Compute the timeline (also trims trailing music-only segments)
+    const { timeline, musicVolumeSegments, totalDuration, lastVoiceEndTime } = this.computeTimeline(
       segments,
       voiceResults,
       sfxResults,
@@ -162,12 +162,10 @@ class TimelineComposerService {
       entries: timeline.length,
       musicVolumeSegments: musicVolumeSegments.length,
       totalDuration: totalDuration.toFixed(1),
+      lastVoiceEndTime: lastVoiceEndTime.toFixed(1),
     });
 
     // 2. Prepare the music track (trim/extend to match total duration)
-    //    When the music is longer and the ad ends with a music outro, preserve
-    //    the music's natural ending (Suno button endings sound much better than
-    //    an arbitrary trim point).
     const musicDuration = await ffmpegService.getAudioDuration(musicFilePath);
     let preparedMusicPath = musicFilePath;
 
@@ -178,54 +176,21 @@ class TimelineComposerService {
       preparedMusicPath = extendedPath;
       logger.info(`Music extended from ${musicDuration.toFixed(1)}s to ${totalDuration.toFixed(1)}s`);
     } else if (musicDuration > totalDuration + 1) {
-      // Music too long — try to preserve the natural ending for the outro
-      const lastSeg = segments[segments.length - 1];
-      const lastSegIsOutro =
-        lastSeg &&
-        (lastSeg.type === 'music_solo' || lastSeg.type === 'silence') &&
-        (lastSeg.music?.behavior === 'full' || lastSeg.music?.behavior === 'resolving');
-      const outroDuration = lastSegIsOutro ? lastSeg.duration : 0;
-
-      if (outroDuration > 0 && musicDuration >= totalDuration) {
-        // Splice: use the start of the music for the body, crossfade into
-        // the natural ending of the music for the outro segment.
-        const splicedPath = path.join(outputDir, `timeline_music_splice_${uuidv4().slice(0, 8)}.mp3`);
-        await this.spliceMusicWithNaturalEnding(
-          musicFilePath,
-          musicDuration,
-          totalDuration,
-          outroDuration,
-          splicedPath
-        );
-        preparedMusicPath = splicedPath;
-        logger.info(
-          `Music spliced: body from start, natural ending for last ${outroDuration.toFixed(1)}s ` +
-          `(music ${musicDuration.toFixed(1)}s → ad ${totalDuration.toFixed(1)}s)`
-        );
-      } else {
-        // No outro segment — simple trim from start
-        const trimmedPath = path.join(outputDir, `timeline_music_trim_${uuidv4().slice(0, 8)}.mp3`);
-        await ffmpegService.trimAudio(musicFilePath, totalDuration, trimmedPath);
-        preparedMusicPath = trimmedPath;
-        logger.info(`Music trimmed from ${musicDuration.toFixed(1)}s to ${totalDuration.toFixed(1)}s`);
-      }
+      // Music too long — simple trim from start
+      const trimmedPath = path.join(outputDir, `timeline_music_trim_${uuidv4().slice(0, 8)}.mp3`);
+      await ffmpegService.trimAudio(musicFilePath, totalDuration, trimmedPath);
+      preparedMusicPath = trimmedPath;
+      logger.info(`Music trimmed from ${musicDuration.toFixed(1)}s to ${totalDuration.toFixed(1)}s`);
     }
 
     // 3. Apply volume envelope to music
     const envelopedMusicPath = path.join(outputDir, `timeline_music_env_${uuidv4().slice(0, 8)}.mp3`);
     await this.applyMusicVolumeEnvelope(preparedMusicPath, musicVolumeSegments, totalDuration, envelopedMusicPath);
 
-    // 4. Compute a musical fade-out based on the last segment
-    //    When the ad ends with a music outro, use the full outro segment duration
-    //    as the fade-out so the music resolves naturally instead of cutting hard.
-    const lastSeg = segments[segments.length - 1];
-    const lastSegIsOutro =
-      lastSeg &&
-      (lastSeg.type === 'music_solo' || lastSeg.type === 'silence') &&
-      (lastSeg.music?.behavior === 'full' || lastSeg.music?.behavior === 'resolving');
-    const effectiveFadeOut = lastSegIsOutro
-      ? Math.max(fadeOut, lastSeg.duration * 0.8) // use ~80% of outro for a natural fade
-      : fadeOut;
+    // 4. Compute fade-out: use the trailing music-after-voice duration
+    //    so the music fades out smoothly right as the voice ends.
+    const trailingMusic = totalDuration - lastVoiceEndTime;
+    const effectiveFadeOut = Math.max(fadeOut, trailingMusic);
 
     // 5. Build and run the FFmpeg filter_complex
     await this.buildAndRunMix({
@@ -284,6 +249,7 @@ class TimelineComposerService {
     timeline: TimelineEntry[];
     musicVolumeSegments: MusicVolumeSegment[];
     totalDuration: number;
+    lastVoiceEndTime: number;
   } {
     const timeline: TimelineEntry[] = [];
     const musicVolumeSegments: MusicVolumeSegment[] = [];
@@ -338,7 +304,38 @@ class TimelineComposerService {
       cursor = segEnd;
     }
 
-    return { timeline, musicVolumeSegments, totalDuration: cursor };
+    // ── Align music ending with voiceover ending ───────────────────────
+    // Find the last voice entry and trim trailing music-only segments
+    // so the ad doesn't have music playing alone after the voice ends.
+    const lastVoiceEntry = [...timeline].reverse().find((e) => e.type === 'voice');
+    const lastVoiceEnd = lastVoiceEntry
+      ? lastVoiceEntry.startTime + lastVoiceEntry.duration
+      : cursor;
+
+    const MUSIC_TAIL = 0.5; // allow 0.5s of music after voice for a clean fade
+
+    if (cursor > lastVoiceEnd + MUSIC_TAIL && lastVoiceEntry) {
+      const newDuration = lastVoiceEnd + MUSIC_TAIL;
+
+      logger.info(
+        `Trimming trailing music: ${cursor.toFixed(1)}s → ${newDuration.toFixed(1)}s ` +
+        `(voice ends at ${lastVoiceEnd.toFixed(1)}s)`
+      );
+
+      // Remove music volume segments fully past the new end,
+      // and trim segments that straddle the boundary
+      for (let i = musicVolumeSegments.length - 1; i >= 0; i--) {
+        if (musicVolumeSegments[i].startTime >= newDuration) {
+          musicVolumeSegments.splice(i, 1);
+        } else if (musicVolumeSegments[i].endTime > newDuration) {
+          musicVolumeSegments[i].endTime = newDuration;
+        }
+      }
+
+      cursor = newDuration;
+    }
+
+    return { timeline, musicVolumeSegments, totalDuration: cursor, lastVoiceEndTime: lastVoiceEnd };
   }
 
   /**
@@ -405,94 +402,6 @@ class TimelineComposerService {
     logger.info('Music volume envelope applied', {
       segments: volumeSegments.length,
       totalDuration: totalDuration.toFixed(1),
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // Step 3b: Splice music with natural ending
-  // -------------------------------------------------------------------------
-
-  /**
-   * When the music track is longer than needed and the ad ends with a music
-   * outro, splice the music so the body uses the start of the track and the
-   * outro uses the track's natural ending (Suno button endings).
-   *
-   * Result: [music 0..bodyEnd] --crossfade--> [music tail..musicDuration]
-   * trimmed to exactly totalDuration.
-   */
-  private async spliceMusicWithNaturalEnding(
-    musicPath: string,
-    musicDuration: number,
-    totalDuration: number,
-    outroDuration: number,
-    outputPath: string
-  ): Promise<void> {
-    const crossfade = Math.min(0.5, outroDuration * 0.3); // 0.5s max crossfade
-    const bodyEnd = totalDuration - outroDuration + crossfade;
-    const tailStart = musicDuration - outroDuration;
-
-    // If the tail start would be before bodyEnd in the original audio,
-    // the music isn't long enough to splice — just trim normally
-    if (tailStart <= bodyEnd) {
-      await ffmpegService.trimAudio(musicPath, totalDuration, outputPath);
-      return;
-    }
-
-    return new Promise((resolve, reject) => {
-      try {
-        // Use two inputs from the same file with different seek positions,
-        // crossfade them together, then trim to exact duration
-        const command = ffmpeg();
-
-        // Input 0: body portion (from start)
-        command.input(musicPath);
-        // Input 1: tail portion (natural ending)
-        command.input(musicPath).inputOptions([`-ss ${tailStart.toFixed(3)}`]);
-
-        const filterStr = [
-          // Normalize both portions
-          `[0:a]${NORMALIZE_FILTER},atrim=0:${bodyEnd.toFixed(3)},asetpts=PTS-STARTPTS[body]`,
-          `[1:a]${NORMALIZE_FILTER},asetpts=PTS-STARTPTS[tail]`,
-          // Crossfade body into tail
-          `[body][tail]acrossfade=d=${crossfade.toFixed(3)}:c1=tri:c2=tri[spliced]`,
-          // Trim to exact target duration
-          `[spliced]atrim=0:${totalDuration.toFixed(3)},asetpts=PTS-STARTPTS[out]`,
-        ].join(';');
-
-        command.complexFilter(filterStr, 'out');
-        command
-          .audioCodec('libmp3lame')
-          .audioBitrate('192k')
-          .audioChannels(2)
-          .audioFrequency(SAMPLE_RATE)
-          .output(outputPath);
-
-        command
-          .on('end', () => {
-            logger.info('Music splice with natural ending complete', {
-              bodyEnd: bodyEnd.toFixed(1),
-              tailStart: tailStart.toFixed(1),
-              crossfade: crossfade.toFixed(2),
-            });
-            resolve();
-          })
-          .on('error', (err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            logger.warn(`Music splice failed, falling back to simple trim: ${msg}`);
-            // Fallback: simple trim from start
-            ffmpegService
-              .trimAudio(musicPath, totalDuration, outputPath)
-              .then(() => resolve())
-              .catch(reject);
-          });
-
-        command.run();
-      } catch (error: any) {
-        ffmpegService
-          .trimAudio(musicPath, totalDuration, outputPath)
-          .then(() => resolve())
-          .catch(reject);
-      }
     });
   }
 
