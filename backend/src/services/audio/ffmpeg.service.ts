@@ -349,6 +349,43 @@ class FFmpegService {
   }
 
   /**
+   * Trim audio to an exact duration (cut at a specific point, no tempo change).
+   * Used for bar-aligned trimming where we cut on a bar boundary.
+   */
+  async trimAudio(
+    inputPath: string,
+    targetDuration: number,
+    outputPath: string
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info(`Trimming audio to ${targetDuration.toFixed(2)}s (bar-aligned cut)`);
+
+        const command = ffmpeg(inputPath)
+          .setDuration(targetDuration);
+
+        this.setOutputOptions(command, 'mp3');
+        command.output(outputPath);
+
+        command
+          .on('end', () => {
+            logger.info('Audio trim completed:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('FFmpeg trim error:', msg);
+            reject(new Error(`Failed to trim audio: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
    * Time-stretch audio to an exact target duration (so music and voice timelines match).
    * Uses atempo = currentDuration/targetDuration. Use when music is longer than voice.
    */

@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from '../../config/logger';
 
-const KIE_API_BASE = 'https://api.kie.ai/api/v1';
+/** Default Suno API base URL. Supports sunoapi.org and kie.ai (same interface). */
+const DEFAULT_SUNO_API_BASE = 'https://api.sunoapi.org/api/v1';
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_WAIT_MS = 300000; // 5 min
 
@@ -71,12 +72,14 @@ class KieSunoMusicService {
 
   constructor() {
     this.apiKey = process.env.SUNO_API_KEY || process.env.KIE_API_KEY || '';
-    this.baseUrl = process.env.KIE_API_URL || KIE_API_BASE;
+    this.baseUrl = process.env.SUNO_API_URL || process.env.KIE_API_URL || DEFAULT_SUNO_API_BASE;
     this.callbackUrl =
       process.env.SUNO_CALLBACK_URL || 'https://example.com/api/webhooks/suno';
 
     if (!this.apiKey) {
-      logger.warn('Kie.ai Suno API key not configured (SUNO_API_KEY or KIE_API_KEY)');
+      logger.warn('Suno API key not configured (SUNO_API_KEY or KIE_API_KEY)');
+    } else {
+      logger.info(`Suno API configured: ${this.baseUrl}`);
     }
   }
 
