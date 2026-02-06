@@ -15,6 +15,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { logger } from '../../config/logger';
+import ffmpegService from '../audio/ffmpeg.service';
 
 const execAsync = promisify(exec);
 
@@ -38,6 +39,7 @@ export interface MusicQualityResult {
     loudnessRange: number;
     silenceRatio: number;
     dynamicRange: number;
+    spectralBalance: number;
   };
   /** Raw measurements */
   measurements: {
@@ -48,6 +50,9 @@ export interface MusicQualityResult {
     silenceSeconds: number;
     silencePercent: number;
     rmsVariation: number;
+    spectralCentroid: number;
+    lowEnergyRatio: number;
+    highEnergyRatio: number;
   };
   /** Human-readable assessment */
   summary: string;
@@ -56,11 +61,13 @@ export interface MusicQualityResult {
 }
 
 // Weights for each dimension in the composite score
+// Spectral balance catches "muddy" or "thin" music that passes basic checks.
 const WEIGHTS = {
-  durationMatch: 0.30,
-  loudnessRange: 0.20,
-  silenceRatio: 0.25,
-  dynamicRange: 0.25,
+  durationMatch: 0.25,
+  loudnessRange: 0.18,
+  silenceRatio: 0.22,
+  dynamicRange: 0.20,
+  spectralBalance: 0.15,
 };
 
 // Thresholds
@@ -77,11 +84,12 @@ class MusicQualityService {
     logger.info('Scoring music quality', { musicPath, expectedDuration, genre });
 
     // Run all measurements in parallel
-    const [loudnessData, silenceData, statsData, actualDuration] = await Promise.all([
+    const [loudnessData, silenceData, statsData, actualDuration, spectralData] = await Promise.all([
       this.measureLoudness(musicPath),
       this.detectSilence(musicPath),
       this.measureStats(musicPath),
       this.getDuration(musicPath),
+      ffmpegService.measureSpectralBalance(musicPath),
     ]);
 
     // 1. Duration match score
@@ -98,12 +106,20 @@ class MusicQualityService {
     // 4. Dynamic range score
     const dynamicRange = this.scoreDynamicRange(statsData.rmsVariation);
 
+    // 5. Spectral balance score
+    const spectralBalance = this.scoreSpectralBalance(
+      spectralData.spectralCentroid,
+      spectralData.lowEnergyRatio,
+      spectralData.highEnergyRatio
+    );
+
     // Composite score
     const score =
       WEIGHTS.durationMatch * durationMatch +
       WEIGHTS.loudnessRange * loudnessRange +
       WEIGHTS.silenceRatio * silenceRatio +
-      WEIGHTS.dynamicRange * dynamicRange;
+      WEIGHTS.dynamicRange * dynamicRange +
+      WEIGHTS.spectralBalance * spectralBalance;
 
     const acceptable = score >= ACCEPT_THRESHOLD;
 
@@ -114,6 +130,7 @@ class MusicQualityService {
         loudnessRange: Math.round(loudnessRange * 100) / 100,
         silenceRatio: Math.round(silenceRatio * 100) / 100,
         dynamicRange: Math.round(dynamicRange * 100) / 100,
+        spectralBalance: Math.round(spectralBalance * 100) / 100,
       },
       measurements: {
         actualDuration,
@@ -123,8 +140,11 @@ class MusicQualityService {
         silenceSeconds: silenceData.totalSilence,
         silencePercent: Math.round(silencePercent * 10) / 10,
         rmsVariation: statsData.rmsVariation,
+        spectralCentroid: Math.round(spectralData.spectralCentroid),
+        lowEnergyRatio: Math.round(spectralData.lowEnergyRatio * 100) / 100,
+        highEnergyRatio: Math.round(spectralData.highEnergyRatio * 100) / 100,
       },
-      summary: this.buildSummary(score, { durationMatch, loudnessRange, silenceRatio, dynamicRange }),
+      summary: this.buildSummary(score, { durationMatch, loudnessRange, silenceRatio, dynamicRange, spectralBalance }),
       acceptable,
     };
 
@@ -189,6 +209,41 @@ class MusicQualityService {
     if (rmsVariation < 0.1) return 0.7;        // Slightly flat
     if (rmsVariation <= 0.8) return 0.7;       // Slightly too dynamic
     return 0.4;                                 // Too erratic
+  }
+
+  /**
+   * Score spectral balance: good ad background music should have:
+   *   - Spectral centroid between 800–3500 Hz (not too bass-heavy, not too thin)
+   *   - Low energy ratio (bass) between 0.15–0.45 (not boomy, not anemic)
+   *   - Some high energy (brightness) but not dominated by it
+   *
+   * Bass-heavy music (centroid < 600Hz, low ratio > 0.5) sounds muddy under voice.
+   * Thin music (centroid > 5000Hz, low ratio < 0.10) lacks warmth and body.
+   */
+  private scoreSpectralBalance(
+    spectralCentroid: number,
+    lowEnergyRatio: number,
+    highEnergyRatio: number
+  ): number {
+    let score = 1.0;
+
+    // Centroid scoring: ideal 800–3500 Hz for voice-support background music
+    if (spectralCentroid < 500) score *= 0.4;         // Very bass-heavy, will be muddy
+    else if (spectralCentroid < 800) score *= 0.7;    // Slightly bass-heavy
+    else if (spectralCentroid > 5000) score *= 0.5;   // Very thin/bright
+    else if (spectralCentroid > 3500) score *= 0.8;   // Slightly thin
+
+    // Bass energy scoring: ideal 0.15–0.45
+    if (lowEnergyRatio > 0.55) score *= 0.5;          // Too boomy
+    else if (lowEnergyRatio > 0.45) score *= 0.75;    // Slightly boomy
+    else if (lowEnergyRatio < 0.08) score *= 0.6;     // No bass warmth
+    else if (lowEnergyRatio < 0.15) score *= 0.8;     // Light on bass
+
+    // High energy scoring: a little brightness is good
+    if (highEnergyRatio > 0.4) score *= 0.6;          // Harsh/sizzly
+    else if (highEnergyRatio < 0.02) score *= 0.7;    // Too dull
+
+    return Math.max(0.1, Math.min(1.0, score));
   }
 
   // -------------------------------------------------------------------------
@@ -292,13 +347,14 @@ class MusicQualityService {
 
   private buildSummary(
     score: number,
-    dims: { durationMatch: number; loudnessRange: number; silenceRatio: number; dynamicRange: number }
+    dims: { durationMatch: number; loudnessRange: number; silenceRatio: number; dynamicRange: number; spectralBalance: number }
   ): string {
     const issues: string[] = [];
     if (dims.durationMatch < 0.6) issues.push('duration mismatch');
     if (dims.loudnessRange < 0.6) issues.push('loudness out of range');
     if (dims.silenceRatio < 0.6) issues.push('excessive silence');
     if (dims.dynamicRange < 0.6) issues.push('poor dynamics');
+    if (dims.spectralBalance < 0.6) issues.push('poor spectral balance');
 
     if (score >= 0.8) return 'High quality track';
     if (score >= ACCEPT_THRESHOLD) return `Acceptable quality${issues.length ? ` (minor: ${issues.join(', ')})` : ''}`;

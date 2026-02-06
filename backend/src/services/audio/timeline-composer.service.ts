@@ -128,7 +128,7 @@ class TimelineComposerService {
       musicFilePath,
       sfxResults,
       outputPath,
-      baseMusicVolume = 0.15,
+      baseMusicVolume = 0.12,
       fadeIn = 0.08,
       fadeOut = 0.4,
       fadeCurve = 'exp',
@@ -158,12 +158,30 @@ class TimelineComposerService {
       baseMusicVolume
     );
 
+    // 1b. Apply energy arc modeling to the music volume envelope.
+    //     This modulates volumes based on the ad's narrative arc,
+    //     creating a natural "breathing" quality that follows the story.
+    this.computeEnergyArc(segments, musicVolumeSegments);
+
     logger.info('Timeline computed', {
       entries: timeline.length,
       musicVolumeSegments: musicVolumeSegments.length,
       totalDuration: totalDuration.toFixed(1),
       lastVoiceEndTime: lastVoiceEndTime.toFixed(1),
     });
+
+    // 2a. Apply voice presence EQ to voice tracks for enhanced clarity.
+    //     Boosts 2.5kHz presence + 7kHz air, removes proximity boominess.
+    const voiceEntries = timeline.filter((e) => e.type === 'voice' && e.filePath && fs.existsSync(e.filePath));
+    for (const vEntry of voiceEntries) {
+      try {
+        const eqPath = vEntry.filePath.replace(/\.(mp3|wav)$/, '_veq.$1');
+        await ffmpegService.applyVoicePresenceEQ(vEntry.filePath, eqPath);
+        vEntry.filePath = eqPath;
+      } catch (veqErr: any) {
+        logger.warn(`Voice presence EQ failed for segment ${vEntry.segmentIndex}: ${veqErr.message}`);
+      }
+    }
 
     // 2. Prepare the music track (trim/extend to match total duration)
     const musicDuration = await ffmpegService.getAudioDuration(musicFilePath);
@@ -197,7 +215,7 @@ class TimelineComposerService {
     //    This makes ducking responsive to actual speech rhythm rather than
     //    static volume levels. Falls back to envelope-only if sidechain fails.
     let finalMusicPath = envelopedMusicPath;
-    const voiceEntries = timeline.filter((e) => e.type === 'voice' && e.filePath && fs.existsSync(e.filePath));
+    // voiceEntries already computed above (step 2a) with presence EQ applied
 
     if (voiceEntries.length > 0) {
       try {
@@ -209,7 +227,7 @@ class TimelineComposerService {
           voiceRefPath
         );
 
-        // Apply multiband sidechain ducking (only ducks 500–4000 Hz under voice)
+        // Apply 5-band sidechain ducking (surgical ducking in 150Hz–5kHz voice range)
         const sidechainedPath = path.join(outputDir, `timeline_music_sc_${uuidv4().slice(0, 8)}.mp3`);
         await ffmpegService.applySidechainDucking(envelopedMusicPath, voiceRefPath, sidechainedPath);
         finalMusicPath = sidechainedPath;
@@ -462,10 +480,11 @@ class TimelineComposerService {
     // ── Resolving fade: smooth music fade-out during final voiceover ──
     // Instead of the music cutting at voice end, gradually reduce the
     // music volume over the last RESOLVE_DURATION seconds. This creates
-    // 4 stepped volume reductions that applyVolumeCurve turns into
+    // stepped volume reductions that applyVolumeCurve turns into
     // smooth ramps, so music naturally resolves with the voice.
-    const RESOLVE_DURATION = 2.0; // fade music over last 2s
-    const RESOLVE_STEPS = 4;
+    // 2.5s with 5 steps produces a very natural, broadcast-quality fade.
+    const RESOLVE_DURATION = 2.5; // fade music over last 2.5s
+    const RESOLVE_STEPS = 5;
 
     if (lastVoiceEntry && musicVolumeSegments.length > 0) {
       const resolveStart = Math.max(0, lastVoiceEnd - RESOLVE_DURATION);
@@ -536,19 +555,131 @@ class TimelineComposerService {
       case 'full':
         return 1.0;
       case 'ducked':
-        return baseMusicVolume;
+        // Lower ducking = cleaner voice separation
+        return baseMusicVolume * 0.85;
       case 'building':
-        // Start at ducked, will ramp up (handled in envelope)
-        return baseMusicVolume * 1.5;
+        // Start subtle, will ramp up (handled in envelope)
+        return baseMusicVolume * 1.3;
       case 'resolving':
-        return baseMusicVolume * 1.2;
+        return baseMusicVolume * 1.1;
       case 'accent':
-        return 0.7;
+        return 0.6;
       case 'none':
         return 0.0;
       default:
         return baseMusicVolume;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 2b: Energy Arc Modeling
+  // -------------------------------------------------------------------------
+
+  /**
+   * Model the energy arc of the ad and blend it into the music volume envelope.
+   *
+   * A human composer shapes music energy to match the narrative:
+   *   - Intro: low energy, anticipation
+   *   - Body/features: medium energy, steady groove
+   *   - Peak/climax: high energy, full arrangement
+   *   - CTA: confident resolve, slight lift
+   *   - Outro: gentle resolution
+   *
+   * This method analyzes the ad's segment structure and creates smooth
+   * energy multipliers that modulate the music volume envelope, creating
+   * a natural "breathing" quality that follows the ad's emotional arc.
+   */
+  private computeEnergyArc(
+    segments: AdCreativeSegment[],
+    musicVolumeSegments: MusicVolumeSegment[]
+  ): void {
+    if (segments.length < 2 || musicVolumeSegments.length === 0) return;
+
+    // Map each segment to an energy level (0-10 scale)
+    const segmentEnergies: { startTime: number; endTime: number; energy: number }[] = [];
+    let cursor = 0;
+    for (const seg of segments) {
+      const energy = this.inferSegmentEnergy(seg);
+      segmentEnergies.push({
+        startTime: cursor,
+        endTime: cursor + seg.duration,
+        energy,
+      });
+      cursor += seg.duration;
+    }
+
+    // Normalize energies to a multiplier range (0.7 - 1.15)
+    // This modulates the existing volume curve without overriding it.
+    // The range is intentionally subtle — big swings sound unnatural.
+    const maxEnergy = Math.max(...segmentEnergies.map((s) => s.energy));
+    const minEnergy = Math.min(...segmentEnergies.map((s) => s.energy));
+    const energyRange = maxEnergy - minEnergy || 1;
+
+    for (const mvs of musicVolumeSegments) {
+      // Find the energy of the segment(s) that overlap this volume segment
+      const overlapping = segmentEnergies.filter(
+        (se) => se.startTime < mvs.endTime && se.endTime > mvs.startTime
+      );
+
+      if (overlapping.length === 0) continue;
+
+      // Weighted average energy (by overlap duration)
+      let weightedEnergy = 0;
+      let totalWeight = 0;
+      for (const se of overlapping) {
+        const overlapStart = Math.max(mvs.startTime, se.startTime);
+        const overlapEnd = Math.min(mvs.endTime, se.endTime);
+        const weight = overlapEnd - overlapStart;
+        weightedEnergy += se.energy * weight;
+        totalWeight += weight;
+      }
+
+      const avgEnergy = totalWeight > 0 ? weightedEnergy / totalWeight : 5;
+      const normalizedEnergy = (avgEnergy - minEnergy) / energyRange; // 0-1
+
+      // Map to multiplier: low energy → 0.7x, high energy → 1.15x
+      // Don't apply to 'none' behavior segments
+      if (mvs.behavior !== 'none') {
+        const energyMultiplier = 0.7 + normalizedEnergy * 0.45;
+        mvs.volume = mvs.volume * energyMultiplier;
+      }
+    }
+
+    logger.info('Energy arc applied to music volume envelope', {
+      segmentCount: segmentEnergies.length,
+      energyRange: `${minEnergy}-${maxEnergy}`,
+    });
+  }
+
+  /**
+   * Infer energy level (0-10) for an ad segment based on its type,
+   * label, and music behavior.
+   */
+  private inferSegmentEnergy(seg: AdCreativeSegment): number {
+    const label = (seg.label || '').toLowerCase();
+    const musicBehavior = seg.music?.behavior || 'none';
+
+    // Explicit energy from music behavior
+    if (musicBehavior === 'full') return 8;
+    if (musicBehavior === 'accent') return 7;
+    if (musicBehavior === 'building') return 6;
+    if (musicBehavior === 'none') return 0;
+
+    // Infer from segment type
+    if (seg.type === 'music_solo') return 7;
+    if (seg.type === 'sfx_hit') return 5;
+    if (seg.type === 'silence') return 1;
+
+    // Infer from label keywords
+    if (/intro|hook|opening/i.test(label)) return 4;
+    if (/feature|benefit|product/i.test(label)) return 6;
+    if (/peak|climax|highlight/i.test(label)) return 8;
+    if (/cta|call.to.action|act.now|order|buy/i.test(label)) return 7;
+    if (/deal|offer|discount|sale|price/i.test(label)) return 6;
+    if (/close|outro|ending|resolve/i.test(label)) return 4;
+
+    // Default: moderate energy for voiceover segments
+    return 5;
   }
 
   // -------------------------------------------------------------------------
@@ -676,9 +807,9 @@ class TimelineComposerService {
         filters.push(`[mixraw]atrim=0:${trimDuration},asetpts=PTS-STARTPTS[trimmed]`);
 
         // Apply fades
-        // Allow up to 4s fade-out for musical outro segments (vs 0.6s for generic)
+        // Allow up to 5s fade-out for musical outro segments (broadcast standard)
         const clampedFadeIn = Math.max(0.02, Math.min(0.12, fadeIn));
-        const clampedFadeOut = Math.max(0.1, Math.min(4.0, fadeOut));
+        const clampedFadeOut = Math.max(0.1, Math.min(5.0, fadeOut));
         const fadeOutStart = Math.max(0, trimDuration - clampedFadeOut);
         const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
 

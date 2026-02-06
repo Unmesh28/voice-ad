@@ -436,7 +436,7 @@ export class ProductionOrchestrator {
       // Loudness: crossPlatform = -16 LUFS, -2 dBTP (Spotify/podcasts); broadcast = -24 LUFS, -2 dBTP (FCC/EBU)
       const mixSettings: Record<string, unknown> = {
         voiceVolume: 1.0,
-        musicVolume: 0.15,
+        musicVolume: 0.12,
         fadeIn: 0.1,
         fadeOut: 0.4,
         audioDucking: true,
@@ -773,7 +773,7 @@ export class ProductionOrchestrator {
     const outputPath = path.join(productionsDir, outputFilename);
 
     // Resolve mix settings from LLM metadata
-    const baseMusicVolume = scriptMetadata?.volume?.musicVolume ?? 0.15;
+    const baseMusicVolume = scriptMetadata?.volume?.musicVolume ?? 0.12;
     const fadeIn = scriptMetadata?.fades?.fadeInSeconds ?? 0.08;
     const fadeOut = scriptMetadata?.fades?.fadeOutSeconds ?? 0.4;
     const fadeCurve = scriptMetadata?.fades?.curve ?? 'exp';
