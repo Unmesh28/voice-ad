@@ -239,6 +239,30 @@ export function buildSunoPromptFromScriptAnalysis(
 }
 
 /**
+ * Build a Suno payload from a MusicalBlueprint.
+ *
+ * When a blueprint is available (Tier 2), use this instead of
+ * buildSunoPromptFromScriptAnalysis. The blueprint's compositionPrompt
+ * is already bar-based (not timestamp-based), which produces better
+ * musical structure from Suno.
+ */
+export function buildSunoPromptFromBlueprint(
+  blueprint: { compositionPrompt: string; finalBPM: number; totalBars: number; totalDuration: number },
+  genre: string,
+  durationSeconds: number
+): SunoPromptResult {
+  const title = `Ad ${Math.round(durationSeconds)}s ${genre}`.slice(0, SUNO_TITLE_MAX);
+  const style = blueprint.compositionPrompt.slice(0, SUNO_STYLE_MAX);
+
+  return {
+    customMode: true,
+    title,
+    style,
+    prompt: '',
+  };
+}
+
+/**
  * @deprecated Use buildSunoPromptFromScriptAnalysis for full script analysis.
  * Kept for backward compatibility.
  */

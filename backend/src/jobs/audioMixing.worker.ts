@@ -14,6 +14,8 @@ import redisConnection from '../config/redis';
 import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
 import { alignMusicToVoice } from '../utils/musical-timing';
+import { analyzeMusic } from '../services/audio/music-analyzer.service';
+import { alignVoiceToMusic, type AlignmentResult } from '../services/audio/music-aligner.service';
 
 interface AudioMixingJobData {
   userId: string;
@@ -122,6 +124,22 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     const targetBPM: number = settings.targetBPM ?? 100;
     const genre: string = settings.genre ?? '';
 
+    // Blueprint data from orchestrator (when available)
+    const blueprintPreRoll: number | undefined = settings.blueprintPreRollDuration;
+    const blueprintPostRollBars: number = settings.blueprintTotalBars
+      ? Math.max(1, Math.round((settings.blueprintPostRollDuration ?? 0) / (settings.blueprintBarDuration ?? 2.4)))
+      : 1;
+    const blueprintBarDuration: number | undefined = settings.blueprintBarDuration;
+
+    // Sentence timings + cues for ducking
+    const sentenceCues = scriptMetadata?.sentenceCues as { index: number; musicVolumeMultiplier?: number }[] | undefined;
+    const sentenceTimings = scriptMetadata?.lastTTS?.sentenceTimings as
+      | { text: string; startSeconds: number; endSeconds: number }[]
+      | undefined;
+
+    let voiceDelaySec = 0; // How much to delay voice in the mix (for pre-roll)
+    let alignmentResult: AlignmentResult | undefined;
+
     if (voicePath && musicPath) {
       const voiceDuration = await ffmpegService.getAudioDuration(voicePath);
       const musicDuration = await ffmpegService.getAudioDuration(musicPath);
@@ -142,44 +160,116 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       if (!fs.existsSync(musicDir)) fs.mkdirSync(musicDir, { recursive: true });
 
       if (alignment.action === 'trim') {
-        // Trim on a bar boundary (preserves musical structure, no tempo change)
         const trimmedFilename = `trimmed_music_${uuidv4()}.mp3`;
         const trimmedMusicPath = path.join(musicDir, trimmedFilename);
         logger.info(`Trimming music from ${musicDuration.toFixed(1)}s to ${alignment.targetDuration.toFixed(1)}s (${alignment.targetBars} bars at ${targetBPM} BPM)`);
         await ffmpegService.trimAudio(musicPath, alignment.targetDuration, trimmedMusicPath);
         finalMusicPath = trimmedMusicPath;
-        await job.updateProgress(50);
       } else if (alignment.action === 'loop') {
-        // Loop on bar boundaries (seamless because loop point = bar boundary)
         const loopedFilename = `looped_music_${uuidv4()}.mp3`;
         const loopedMusicPath = path.join(musicDir, loopedFilename);
         logger.info(`Looping music from ${musicDuration.toFixed(1)}s to ${alignment.targetDuration.toFixed(1)}s (${alignment.loopCount} loops, ${alignment.targetBars} bars)`);
         await ffmpegService.extendAudioDuration(musicPath, alignment.targetDuration, loopedMusicPath);
         finalMusicPath = loopedMusicPath;
-        await job.updateProgress(50);
       }
-      // 'use_as_is': music duration is already close enough to target
+
+      await job.updateProgress(45);
+
+      // ========== MUSIC ANALYSIS + VOICE-MUSIC ALIGNMENT (Tier 3) ==========
+      // Analyze the music to detect its actual beat grid and energy curve,
+      // then compute intelligent alignment: voice delay (enters on a downbeat),
+      // beat-aware ducking, and bar-aligned button ending.
+      if (finalMusicPath && Array.isArray(sentenceTimings) && sentenceTimings.length > 0) {
+        try {
+          logger.info(`[Tier 3] Running music analysis on ${finalMusicPath}`);
+          const musicAnalysis = await analyzeMusic(finalMusicPath, targetBPM);
+
+          // Build per-sentence volume multiplier map from cues
+          const volumeMultipliers = new Map<number, number>();
+          if (Array.isArray(sentenceCues)) {
+            for (const cue of sentenceCues) {
+              if (cue.musicVolumeMultiplier != null) {
+                volumeMultipliers.set(cue.index, cue.musicVolumeMultiplier);
+              }
+            }
+          }
+
+          const preRollDuration = blueprintPreRoll ?? alignment.preRollDuration;
+          const barDur = blueprintBarDuration ?? alignment.barDuration;
+
+          alignmentResult = alignVoiceToMusic(musicAnalysis, sentenceTimings, {
+            preRollDuration,
+            postRollBars: blueprintPostRollBars,
+            barDuration: barDur,
+            duckLevel: duckingAmount,
+            musicVolumeMultipliers: volumeMultipliers.size > 0 ? volumeMultipliers : undefined,
+          });
+
+          voiceDelaySec = alignmentResult.voiceDelay;
+
+          // If the alignment says to cut earlier than the current music, trim to button ending
+          if (alignmentResult.musicCutoffTime < musicDuration && alignmentResult.musicCutoffTime > 0) {
+            const cutFilename = `button_music_${uuidv4()}.mp3`;
+            const cutMusicPath = path.join(musicDir, cutFilename);
+            logger.info(`[Tier 3] Trimming music for button ending at ${alignmentResult.musicCutoffTime.toFixed(1)}s (bar ${alignmentResult.buttonEndingBar})`);
+            await ffmpegService.trimAudio(finalMusicPath, alignmentResult.musicCutoffTime, cutMusicPath);
+            finalMusicPath = cutMusicPath;
+          }
+
+          logger.info(`[Tier 3] Alignment complete: voiceDelay=${voiceDelaySec.toFixed(2)}s, ` +
+            `cutoff=${alignmentResult.musicCutoffTime.toFixed(1)}s, ` +
+            `${alignmentResult.duckingSegments.length} ducking segments, ` +
+            `score=${alignmentResult.alignmentScore.toFixed(2)}`);
+        } catch (analysisError: any) {
+          // Non-fatal: if analysis fails, fall back to Tier 1 behavior (no voice delay)
+          logger.warn(`[Tier 3] Music analysis/alignment failed, using Tier 1 fallback: ${analysisError.message}`);
+          voiceDelaySec = 0;
+        }
+      }
+
+      await job.updateProgress(55);
     }
 
-    // Per-sentence music volume: when script has sentenceCues + lastTTS.sentenceTimings, apply volume curve to music
-    const sentenceCues = scriptMetadata?.sentenceCues as { index: number; musicVolumeMultiplier?: number }[] | undefined;
-    const sentenceTimings = scriptMetadata?.lastTTS?.sentenceTimings as
-      | { startSeconds: number; endSeconds: number }[]
-      | undefined;
-    const hasSentenceVolume =
+    // ========== BEAT-AWARE DUCKING ==========
+    // When alignment result is available, apply beat-aware ducking
+    // (duck boundaries snap to beats). Otherwise fall back to per-sentence volume.
+    if (alignmentResult && alignmentResult.duckingSegments.length > 0 && finalMusicPath) {
+      // Convert ducking segments to volume curve entries
+      // The ducking segments are in absolute mix time (music time, with voice delay applied)
+      const totalMusicDuration = await ffmpegService.getAudioDuration(finalMusicPath);
+      const curve: { startSeconds: number; endSeconds: number; volumeMultiplier: number }[] = [];
+
+      for (const seg of alignmentResult.duckingSegments) {
+        curve.push({
+          startSeconds: Math.max(0, seg.startTime),
+          endSeconds: Math.min(totalMusicDuration, seg.endTime),
+          volumeMultiplier: seg.duckLevel,
+        });
+      }
+
+      if (curve.length > 0) {
+        const curvedFilename = `ducked_music_${uuidv4()}.mp3`;
+        const musicDir = path.join(uploadDir, 'music');
+        const curvedMusicPath = path.join(musicDir, curvedFilename);
+        if (!fs.existsSync(musicDir)) fs.mkdirSync(musicDir, { recursive: true });
+        await ffmpegService.applyVolumeCurve(finalMusicPath, curve, totalMusicDuration, curvedMusicPath);
+        finalMusicPath = curvedMusicPath;
+        logger.info(`[Tier 3] Applied beat-aware ducking (${curve.length} segments) for production ${productionId}`);
+      }
+    } else if (
       Array.isArray(sentenceCues) &&
       sentenceCues.length > 0 &&
       Array.isArray(sentenceTimings) &&
       sentenceTimings.length > 0 &&
       finalMusicPath &&
-      voicePath;
-
-    if (hasSentenceVolume && finalMusicPath) {
+      voicePath
+    ) {
+      // Fallback: simple per-sentence volume curve (Tier 1 behavior)
       const voiceDuration = await ffmpegService.getAudioDuration(voicePath);
-      const cueByIndex = new Map(sentenceCues!.map((c) => [c.index, c]));
+      const cueByIndex = new Map(sentenceCues.map((c) => [c.index, c]));
       const curve: { startSeconds: number; endSeconds: number; volumeMultiplier: number }[] = [];
-      for (let i = 0; i < sentenceTimings!.length; i++) {
-        const t = sentenceTimings![i];
+      for (let i = 0; i < sentenceTimings.length; i++) {
+        const t = sentenceTimings[i];
         const cue = cueByIndex.get(i);
         const mult = cue?.musicVolumeMultiplier != null ? Math.max(0.1, Math.min(3, cue.musicVolumeMultiplier)) : 1;
         curve.push({
@@ -190,8 +280,8 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       }
       if (curve.length > 0) {
         const curvedFilename = `curved_music_${uuidv4()}.mp3`;
-        const curvedMusicPath = path.join(uploadDir, 'music', curvedFilename);
         const musicDir = path.join(uploadDir, 'music');
+        const curvedMusicPath = path.join(musicDir, curvedFilename);
         if (!fs.existsSync(musicDir)) fs.mkdirSync(musicDir, { recursive: true });
         await ffmpegService.applyVolumeCurve(finalMusicPath, curve, voiceDuration, curvedMusicPath);
         finalMusicPath = curvedMusicPath;
@@ -200,11 +290,15 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     }
 
     // Mix audio
-    logger.info(`Mixing audio for production ${productionId}`);
+    logger.info(`Mixing audio for production ${productionId}`, {
+      voiceDelay: voiceDelaySec.toFixed(2),
+      hasAlignment: !!alignmentResult,
+    });
     await ffmpegService.mixAudio({
       voiceInput: voicePath ? {
         filePath: voicePath,
         volume: voiceVolume,
+        delay: voiceDelaySec > 0 ? voiceDelaySec : undefined,
         fadeIn,
         fadeOut,
         fadeCurve,
@@ -215,7 +309,7 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       } : undefined,
       outputPath,
       outputFormat: outputFormat as any,
-      audioDucking,
+      audioDucking: alignmentResult ? false : audioDucking, // When we have beat-aware ducking, disable the basic ducking
       duckingAmount,
       fadeCurve,
       normalize: !normalizeLoudness,
@@ -224,7 +318,65 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       loudnessTruePeak,
     });
 
-    await job.updateProgress(80);
+    await job.updateProgress(75);
+
+    // ========== TWO-PASS MIXING (Tier 4) ==========
+    // After the first mix, measure its loudness. If it's more than 3 LU off
+    // target, adjust music volume and remix for a tighter result.
+    if (normalizeLoudness && finalMusicPath && voicePath) {
+      try {
+        const measuredLoudness = await ffmpegService.measureLoudness(outputPath);
+        const loudnessGap = measuredLoudness - loudnessTargetLUFS;
+
+        logger.info(`[Two-pass] First mix loudness: ${measuredLoudness.toFixed(1)} LUFS (target: ${loudnessTargetLUFS}, gap: ${loudnessGap.toFixed(1)})`, {
+          productionId,
+        });
+
+        // If the gap is large, the music volume might be competing with the voice.
+        // Adjust: if mix is too loud (loudnessGap > 3), reduce music. If too quiet, boost music slightly.
+        if (Math.abs(loudnessGap) > 3) {
+          const adjustFactor = loudnessGap > 0 ? 0.7 : 1.3;
+          const adjustedMusicVolume = Math.max(0.05, Math.min(0.5, musicVolume * adjustFactor));
+
+          logger.info(`[Two-pass] Remixing: musicVolume ${musicVolume.toFixed(2)} → ${adjustedMusicVolume.toFixed(2)}`, {
+            productionId,
+            adjustFactor,
+          });
+
+          await ffmpegService.mixAudio({
+            voiceInput: {
+              filePath: voicePath,
+              volume: voiceVolume,
+              delay: voiceDelaySec > 0 ? voiceDelaySec : undefined,
+              fadeIn,
+              fadeOut,
+              fadeCurve,
+            },
+            musicInput: {
+              filePath: finalMusicPath,
+              volume: adjustedMusicVolume,
+            },
+            outputPath,
+            outputFormat: outputFormat as any,
+            audioDucking: alignmentResult ? false : audioDucking,
+            duckingAmount,
+            fadeCurve,
+            normalize: !normalizeLoudness,
+            normalizeLoudness,
+            loudnessTargetLUFS,
+            loudnessTruePeak,
+          });
+
+          const remeasured = await ffmpegService.measureLoudness(outputPath);
+          logger.info(`[Two-pass] Remixed loudness: ${remeasured.toFixed(1)} LUFS`, { productionId });
+        }
+      } catch (twoPassErr: any) {
+        // Non-fatal: if two-pass measurement fails, keep the first mix
+        logger.warn(`[Two-pass] Analysis failed, keeping first mix: ${twoPassErr.message}`);
+      }
+    }
+
+    await job.updateProgress(85);
 
     // Get duration
     const duration = await ffmpegService.getAudioDuration(outputPath);

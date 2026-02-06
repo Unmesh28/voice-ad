@@ -15,7 +15,8 @@ import { QueueEvents } from 'bullmq';
 import redisConnection from '../config/redis';
 import { logger, ttmPromptLogger } from '../config/logger';
 import voiceSelectorService from './voice-selector.service';
-import { buildSunoPromptFromScriptAnalysis } from './music/suno-prompt-builder';
+import { buildSunoPromptFromScriptAnalysis, buildSunoPromptFromBlueprint } from './music/suno-prompt-builder';
+import { generateMusicalBlueprint, type MusicalBlueprint } from './music/musical-blueprint.service';
 import mongoose from 'mongoose';
 
 interface QuickProductionInput {
@@ -215,42 +216,43 @@ export class ProductionOrchestrator {
         }
       }
 
-      // Build one full composition prompt for Suno from the LLM's script analysis
+      // ========== MUSICAL BLUEPRINT (Tier 2) ==========
+      // When TTS sentence timings are available, generate a precise musical
+      // blueprint with bar/beat alignment. The blueprint produces a bar-based
+      // Suno prompt that describes musical structure (bars, sections, energy)
+      // instead of timestamps (which Suno can't hit reliably).
+      const sentenceTimings = scriptMetadata?.lastTTS?.sentenceTimings as
+        | { text: string; startSeconds: number; endSeconds: number }[]
+        | undefined;
+      const hasSentenceTimings = Array.isArray(sentenceTimings) && sentenceTimings.length > 0;
+
+      let blueprint: MusicalBlueprint | undefined;
       let sunoPayload: { customMode?: boolean; title?: string; style?: string; prompt: string } | undefined;
-      if (scriptMetadata?.music && typeof scriptMetadata.music === 'object') {
-        const productionContext = scriptMetadata.productionContext || scriptMetadata.adProductionJson?.context;
-        const contextForMusic =
-          productionContext &&
-            typeof productionContext.adCategory === 'string' &&
-            typeof productionContext.tone === 'string'
-            ? {
-              adCategory: productionContext.adCategory,
-              tone: productionContext.tone,
-              emotion: productionContext.emotion ?? productionContext.tone,
-              pace: productionContext.pace ?? 'moderate',
-            }
-            : undefined;
-        const sentenceTimings = scriptMetadata?.lastTTS?.sentenceTimings as
-          | { text: string; startSeconds: number; endSeconds: number }[]
-          | undefined;
-        const sunoResult = buildSunoPromptFromScriptAnalysis({
-          music: {
-            prompt: musicPrompt,
-            targetBPM: targetBPM ?? 100,
-            genre: musicGenre,
-            mood: musicMood,
-            // Arc data informs the prompt's compositional direction, but we always generate ONE track
-            arc: scriptMetadata.music.arc,
-            composerDirection: scriptMetadata.music.composerDirection,
-          },
-          durationSeconds: duration,
-          context: contextForMusic ?? undefined,
-          fades: scriptMetadata.fades,
-          volume: scriptMetadata.volume,
-          mixPreset: scriptMetadata.mixPreset,
+
+      if (hasSentenceTimings && sentenceTimings) {
+        // Compute voice duration from sentence timings
+        const voiceDuration = sentenceTimings[sentenceTimings.length - 1].endSeconds;
+
+        blueprint = generateMusicalBlueprint({
+          script: scriptForMusic.content,
+          sentenceTimings,
           sentenceCues: scriptMetadata.sentenceCues,
-          sentenceTimings: Array.isArray(sentenceTimings) && sentenceTimings.length > 0 ? sentenceTimings : undefined,
+          targetBPM: targetBPM ?? 100,
+          genre: musicGenre,
+          mood: musicMood,
+          totalVoiceDuration: voiceDuration,
+          composerDirection: scriptMetadata?.music?.composerDirection,
+          instrumentation: scriptMetadata?.music?.instrumentation,
+          arc: scriptMetadata?.music?.arc,
+          buttonEnding: scriptMetadata?.music?.buttonEnding,
+          musicalStructure: scriptMetadata?.music?.musicalStructure,
         });
+
+        // Use blueprint's fine-tuned BPM
+        targetBPM = blueprint.finalBPM;
+
+        // Build Suno payload from the blueprint's bar-based prompt
+        const sunoResult = buildSunoPromptFromBlueprint(blueprint, musicGenre, duration);
         sunoPayload = {
           customMode: sunoResult.customMode,
           title: sunoResult.title || undefined,
@@ -258,25 +260,77 @@ export class ProductionOrchestrator {
           prompt: sunoResult.prompt,
         };
 
-        // Log TTM prompt
-        const logPrompt = sunoResult.customMode ? sunoResult.style : sunoResult.prompt;
-        logger.info(`[Pipeline ${productionId}] Suno composition prompt: ${logPrompt.slice(0, 120)}...`);
+        logger.info(`[Pipeline ${productionId}] Blueprint: ${blueprint.totalBars} bars @ ${blueprint.finalBPM} BPM, ` +
+          `pre-roll=${blueprint.preRollBars} bars, post-roll=${blueprint.postRollBars} bars, ` +
+          `${blueprint.sections.length} sections, ${blueprint.syncPoints.length} sync points`);
+        const logPrompt = sunoResult.style;
+        logger.info(`[Pipeline ${productionId}] Bar-based Suno prompt: ${logPrompt.slice(0, 120)}...`);
         ttmPromptLogger.info(logPrompt, {
           pipelineId: productionId,
           provider: 'suno',
-          mode: sunoResult.customMode ? 'custom' : 'non-custom',
+          mode: 'custom',
           title: sunoResult.title || undefined,
+          blueprintBPM: blueprint.finalBPM,
+          blueprintBars: blueprint.totalBars,
         });
+      } else {
+        // Fallback: no sentence timings available, use the old prompt builder
+        logger.info(`[Pipeline ${productionId}] No sentence timings -- using legacy prompt builder`);
+        if (scriptMetadata?.music && typeof scriptMetadata.music === 'object') {
+          const productionContext = scriptMetadata.productionContext || scriptMetadata.adProductionJson?.context;
+          const contextForMusic =
+            productionContext &&
+              typeof productionContext.adCategory === 'string' &&
+              typeof productionContext.tone === 'string'
+              ? {
+                adCategory: productionContext.adCategory,
+                tone: productionContext.tone,
+                emotion: productionContext.emotion ?? productionContext.tone,
+                pace: productionContext.pace ?? 'moderate',
+              }
+              : undefined;
+          const sunoResult = buildSunoPromptFromScriptAnalysis({
+            music: {
+              prompt: musicPrompt,
+              targetBPM: targetBPM ?? 100,
+              genre: musicGenre,
+              mood: musicMood,
+              arc: scriptMetadata.music.arc,
+              composerDirection: scriptMetadata.music.composerDirection,
+            },
+            durationSeconds: duration,
+            context: contextForMusic ?? undefined,
+            fades: scriptMetadata.fades,
+            volume: scriptMetadata.volume,
+            mixPreset: scriptMetadata.mixPreset,
+            sentenceCues: scriptMetadata.sentenceCues,
+          });
+          sunoPayload = {
+            customMode: sunoResult.customMode,
+            title: sunoResult.title || undefined,
+            style: sunoResult.style || undefined,
+            prompt: sunoResult.prompt,
+          };
+
+          const logPrompt = sunoResult.customMode ? sunoResult.style : sunoResult.prompt;
+          logger.info(`[Pipeline ${productionId}] Suno composition prompt: ${logPrompt.slice(0, 120)}...`);
+          ttmPromptLogger.info(logPrompt, {
+            pipelineId: productionId,
+            provider: 'suno',
+            mode: sunoResult.customMode ? 'custom' : 'non-custom',
+            title: sunoResult.title || undefined,
+          });
+        }
       }
 
       // SINGLE-TRACK GENERATION ONLY.
       // Segment mode is disabled -- one continuous track produces better results
-      // than crossfading separate clips. The arc data stays in the prompt for
-      // Suno's compositional awareness, but we never split into segments.
+      // than crossfading separate clips.
+      const musicRequestDuration = blueprint ? Math.ceil(blueprint.totalDuration) : duration;
       const musicJob = await musicGenerationQueue.add('generate-music', {
         userId,
         text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
-        duration_seconds: duration, // Suno can handle full duration (up to 8 min)
+        duration_seconds: musicRequestDuration,
         prompt_influence: 0.3,
         genre: musicGenre,
         mood: musicMood,
@@ -285,12 +339,53 @@ export class ProductionOrchestrator {
         sunoTitle: sunoPayload?.title,
         sunoStyle: sunoPayload?.style,
         sunoPrompt: sunoPayload?.prompt,
-        // Segment mode disabled: always generate one continuous track
         segmentBasedGeneration: false,
       });
-      const musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
+      let musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
       if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
       logger.info(`[Pipeline ${productionId}] Music generated: ${musicResult.musicId}`);
+
+      // ========== MUSIC QUALITY GATE (Tier 4) ==========
+      // Quick check: is the generated track's duration within acceptable range?
+      // If it's way too short (>30% below requested), regenerate once.
+      const requestedDuration = musicRequestDuration;
+      try {
+        const musicTrack = await MusicTrack.findById(musicResult.musicId);
+        if (musicTrack?.duration && requestedDuration > 0) {
+          const actualDuration = musicTrack.duration;
+          const durationRatio = actualDuration / requestedDuration;
+          logger.info(`[Pipeline ${productionId}] Quality gate: requested=${requestedDuration}s, actual=${actualDuration}s, ratio=${durationRatio.toFixed(2)}`);
+
+          if (durationRatio < 0.7) {
+            logger.warn(`[Pipeline ${productionId}] Music too short (${actualDuration}s vs ${requestedDuration}s). Regenerating once...`);
+            await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 55, 'Regenerating music for better match...');
+
+            const retryJob = await musicGenerationQueue.add('generate-music', {
+              userId,
+              text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
+              duration_seconds: requestedDuration,
+              prompt_influence: 0.3,
+              genre: musicGenre,
+              mood: musicMood,
+              targetBPM,
+              sunoCustomMode: sunoPayload?.customMode,
+              sunoTitle: sunoPayload?.title,
+              sunoStyle: sunoPayload?.style,
+              sunoPrompt: sunoPayload?.prompt,
+              segmentBasedGeneration: false,
+            });
+            const retryResult = await retryJob.waitUntilFinished(musicQueueEvents);
+            if (retryResult?.musicId) {
+              musicResult = retryResult;
+              logger.info(`[Pipeline ${productionId}] Retry music generated: ${retryResult.musicId}`);
+            }
+          }
+        }
+      } catch (gateErr: any) {
+        // Non-fatal: quality gate failure should not block the pipeline
+        logger.warn(`[Pipeline ${productionId}] Quality gate check failed: ${gateErr.message}`);
+      }
+
       await Production.findByIdAndUpdate(productionId, {
         musicId: new mongoose.Types.ObjectId(musicResult.musicId),
       });
@@ -314,6 +409,14 @@ export class ProductionOrchestrator {
         // Pass BPM + genre so mixing worker can do bar-aligned trim/loop
         targetBPM: targetBPM ?? 100,
         genre: musicGenre,
+        // Blueprint data for the mixing worker (when available)
+        ...(blueprint ? {
+          blueprintPreRollDuration: blueprint.preRollDuration,
+          blueprintPostRollDuration: blueprint.postRollDuration,
+          blueprintTotalDuration: blueprint.totalDuration,
+          blueprintBarDuration: blueprint.barDuration,
+          blueprintTotalBars: blueprint.totalBars,
+        } : {}),
       };
       if (scriptMetadata?.fades) {
         mixSettings.fadeIn = scriptMetadata.fades.fadeInSeconds ?? 0.1;

@@ -155,14 +155,25 @@ class FFmpegService {
           ? Math.max(0.05, baseMusicVol * (1 - duckingAmount * 0.6))
           : baseMusicVol;
 
+        // Voice delay: when blueprint alignment says voice should enter on a
+        // downbeat, we pad silence before the voice so it starts at the right
+        // musical moment. The delay is in seconds on the voice stream.
+        const voiceDelaySec = voiceInput.delay ?? 0;
+
         // Single, compatible filter chain: normalize both to same format and sample rate for proper sync, then mix.
         // Same sample rate (44100) and stereo ensures music and speech stay sample-aligned with no drift.
         const END_PADDING = 0.08;
-        const mixDuration = voiceDuration + END_PADDING;
+        const mixDuration = voiceDuration + voiceDelaySec + END_PADDING;
         const SAMPLE_RATE = 44100;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
+
+        // If voice has a delay, pad it with silence so it enters on the right beat
+        const voiceFilter = voiceDelaySec > 0
+          ? `[0:a]${normalizeSync},volume=${voiceVol},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}[v]`
+          : `[0:a]${normalizeSync},volume=${voiceVol}[v]`;
+
         const filters: string[] = [
-          `[0:a]${normalizeSync},volume=${voiceVol}[v]`,
+          voiceFilter,
           `[1:a]${normalizeSync},volume=${musicVolume}[m]`,
           `[v][m]amix=inputs=2:duration=longest:dropout_transition=2[mixraw]`,
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
@@ -954,6 +965,35 @@ class FFmpegService {
       return true;
     } catch (error) {
       return false;
+    }
+  }
+
+  /**
+   * Measure the integrated loudness (LUFS) of an audio file using FFmpeg ebur128.
+   * Returns the integrated loudness value in LUFS (e.g. -16.0).
+   */
+  async measureLoudness(filePath: string): Promise<number> {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+
+    try {
+      const { stderr } = await execAsync(
+        `ffmpeg -i "${filePath}" -af "ebur128=peak=true" -f null - 2>&1`,
+        { maxBuffer: 5 * 1024 * 1024, timeout: 30000 }
+      );
+
+      // ebur128 outputs "Summary:" section at the end with "I: -16.0 LUFS"
+      const integratedMatch = /I:\s*(-?[\d.]+)\s*LUFS/i.exec(stderr);
+      if (integratedMatch) {
+        return parseFloat(integratedMatch[1]);
+      }
+
+      logger.warn('Could not parse integrated loudness from ebur128 output');
+      return -16; // Default fallback
+    } catch (error: any) {
+      logger.warn(`Loudness measurement failed: ${error.message}`);
+      return -16; // Default fallback
     }
   }
 

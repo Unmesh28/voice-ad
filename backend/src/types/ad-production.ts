@@ -113,6 +113,26 @@ const ButtonEndingSchema = z.object({
   description: z.string().nullish(), // e.g. "Warm major chord, slight sustain, clean release"
 });
 
+/** Structured musical structure for the blueprint (Tier 4). */
+const MusicalStructureSchema = z.object({
+  /** How the music opens (determines intro arrangement density). */
+  introType: z.enum(['ambient_build', 'rhythmic_hook', 'melodic_theme', 'silence_to_entry']),
+  /** Number of bars for the intro before voice enters (1-4). */
+  introBars: z.number().min(1).max(4),
+  /** One-word feel for the main body section. */
+  bodyFeel: z.string(),
+  /** Where the musical peak should land (e.g. "bar 12", "at brand reveal"). */
+  peakMoment: z.string(),
+  /** How the music ends. */
+  endingType: z.enum(['button', 'sustain', 'stinger', 'decay']),
+  /** Number of bars for the outro after last word (1-4). */
+  outroBars: z.number().min(1).max(4),
+  /** Optional: key signature (e.g. "C major", "A minor"). Helps Suno stay harmonically consistent. */
+  keySignature: z.string().nullish(),
+  /** Bars per phrase (usually 4 or 8). Sections should snap to this boundary. */
+  phraseLength: z.number().min(2).max(8).nullish(),
+});
+
 const MusicSchema = z.object({
   prompt: z.string(),
   targetBPM: z.number(),
@@ -126,6 +146,8 @@ const MusicSchema = z.object({
   instrumentation: InstrumentationSchema.nullish(),
   /** Optional: button ending specification (no fade-out). */
   buttonEnding: ButtonEndingSchema.nullish(),
+  /** Optional: structured musical form for the blueprint (intro type, peak placement, ending type). */
+  musicalStructure: MusicalStructureSchema.nullish(),
 });
 
 const FadesSchema = z.object({
@@ -154,6 +176,8 @@ const SentenceCueSchema = z.object({
   musicVolumeMultiplier: z.number().nullish(), // 0.7–1.3; e.g. 0.8 = quieter under this sentence
   /** Optional: short composer note for that phrase (e.g. "swell", "staccato", "hold", "hit on downbeat", "quiet under"). */
   musicDirection: z.string().nullish(),
+  /** Optional: musical function of this sentence in the overall composition (hook, build, peak, resolve, transition, pause). */
+  musicalFunction: z.enum(['hook', 'build', 'peak', 'resolve', 'transition', 'pause']).nullish(),
 });
 
 /** Sound design cue for key moments (whoosh, hits, product sounds, transitions). */
@@ -251,6 +275,16 @@ export const AD_PRODUCTION_EXAMPLE_JSON: AdProductionLLMResponse = {
       timing: '0.5s after final word',
       description: 'Warm major chord resolves cleanly, no fade-out',
     },
+    musicalStructure: {
+      introType: 'ambient_build',
+      introBars: 2,
+      bodyFeel: 'driving',
+      peakMoment: 'at brand reveal',
+      endingType: 'button',
+      outroBars: 1,
+      keySignature: 'C major',
+      phraseLength: 4,
+    },
   },
   fades: {
     fadeInSeconds: 0.1,
@@ -277,9 +311,9 @@ export const AD_PRODUCTION_EXAMPLE_JSON: AdProductionLLMResponse = {
   },
   mixPreset: 'voiceProminent',
   sentenceCues: [
-    { index: 0, musicCue: 'hook', musicVolumeMultiplier: 0.85, musicDirection: 'swell' },
-    { index: 1, musicCue: 'warm', musicVolumeMultiplier: 1.0, musicDirection: null },
-    { index: 2, musicCue: 'cta', musicVolumeMultiplier: 1.1, musicDirection: 'hit on downbeat' },
+    { index: 0, musicCue: 'hook', musicVolumeMultiplier: 0.85, musicDirection: 'swell', musicalFunction: 'hook' },
+    { index: 1, musicCue: 'warm', musicVolumeMultiplier: 1.0, musicDirection: null, musicalFunction: 'build' },
+    { index: 2, musicCue: 'cta', musicVolumeMultiplier: 1.1, musicDirection: 'hit on downbeat', musicalFunction: 'resolve' },
   ],
   soundDesign: [
     { timestamp: 7.5, sound: 'subtle whoosh', purpose: 'Transition to product intro' },
@@ -396,6 +430,22 @@ export function getOpenAIAdProductionJsonSchema(): {
               required: ['type'],
               additionalProperties: false,
             },
+            musicalStructure: {
+              type: ['object', 'null'],
+              description: 'Optional structured musical form: intro type, peak placement, ending type. Provides precise blueprint input for bar-aware composition.',
+              properties: {
+                introType: { type: 'string', enum: ['ambient_build', 'rhythmic_hook', 'melodic_theme', 'silence_to_entry'], description: 'How the music opens' },
+                introBars: { type: 'number', description: 'Bars for intro before voice enters (1-4)' },
+                bodyFeel: { type: 'string', description: 'One-word feel for main body: driving, flowing, pulsing, steady, etc.' },
+                peakMoment: { type: 'string', description: 'Where the musical peak should land, e.g. "at brand reveal", "bar 12"' },
+                endingType: { type: 'string', enum: ['button', 'sustain', 'stinger', 'decay'], description: 'How the music ends' },
+                outroBars: { type: 'number', description: 'Bars for outro after last word (1-4)' },
+                keySignature: { type: ['string', 'null'], description: 'Optional key, e.g. "C major", "A minor"' },
+                phraseLength: { type: ['number', 'null'], description: 'Bars per phrase (2-8, usually 4)' },
+              },
+              required: ['introType', 'introBars', 'bodyFeel', 'peakMoment', 'endingType', 'outroBars'],
+              additionalProperties: false,
+            },
           },
           required: ['prompt', 'targetBPM', 'genre', 'mood'],
           additionalProperties: false,
@@ -452,6 +502,11 @@ export function getOpenAIAdProductionJsonSchema(): {
               musicDirection: {
                 type: ['string', 'null'],
                 description: 'Optional short composer note for that phrase: e.g. swell, staccato, hold, hit on downbeat, quiet under',
+              },
+              musicalFunction: {
+                type: ['string', 'null'],
+                enum: ['hook', 'build', 'peak', 'resolve', 'transition', 'pause', null],
+                description: 'Musical function of this sentence: hook (attention-grab), build (rising energy), peak (climax), resolve (settling), transition (bridging), pause (musical breath)',
               },
             },
             required: ['index'],
@@ -597,6 +652,9 @@ export function applySafeDefaultsAndClamp(
       mood: parsed.music?.mood ?? undefined,
       ...(composerDirection ? { composerDirection } : {}),
       ...(arc && arc.length >= 2 ? { arc } : {}),
+      ...(parsed.music?.instrumentation ? { instrumentation: parsed.music.instrumentation } : {}),
+      ...(parsed.music?.buttonEnding ? { buttonEnding: parsed.music.buttonEnding } : {}),
+      ...(parsed.music?.musicalStructure ? { musicalStructure: parsed.music.musicalStructure } : {}),
     },
     fades,
     volume,
