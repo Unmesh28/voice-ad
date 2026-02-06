@@ -117,6 +117,29 @@ export const generateScriptSync = asyncHandler(async (req: Request, res: Respons
 });
 
 /**
+ * Generate unified ad production JSON (script with tags, context, music prompt, fades, volume).
+ * Single LLM call; response is validated and clamped. Used by the studio-grade pipeline.
+ */
+export const generateAdProductionJSON = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) {
+    throw new AppError('User not authenticated', 401);
+  }
+
+  const { prompt, durationSeconds, tone } = req.body;
+
+  const result = await openAIService.generateAdProductionJSON({
+    prompt,
+    durationSeconds,
+    tone,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+/**
  * Create a new script manually
  */
 export const createScript = asyncHandler(async (req: Request, res: Response) => {

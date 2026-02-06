@@ -25,6 +25,13 @@ router.post(
   scriptController.generateVariations
 );
 
+// Unified ad production JSON (script + context + music + fades + volume)
+router.post(
+  '/generate-ad-json',
+  validate(schemas.generateAdProductionJSON),
+  scriptController.generateAdProductionJSON
+);
+
 // CRUD operations
 router.post('/', validate(schemas.createScript), scriptController.createScript);
 router.get('/', scriptController.getScripts);

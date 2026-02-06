@@ -36,7 +36,7 @@ if ! grep -q "replSetName" $CONFIG_FILE; then
     echo "Adding replica set configuration..."
     sudo tee -a $CONFIG_FILE > /dev/null <<'REPLCONF'
 
-# Replication configuration for Prisma
+# Replication configuration (optional, for MongoDB transactions)
 replication:
   replSetName: rs0
 REPLCONF

@@ -1,8 +1,6 @@
-import dotenv from 'dotenv';
 import path from 'path';
-
-// Load environment variables from the current working directory
-dotenv.config({ path: path.join(process.cwd(), '.env') });
+import { loadEnv } from '../config/env';
+loadEnv();
 
 import { Worker, Job } from 'bullmq';
 import { audioMixingQueue } from '../config/redis';
@@ -78,14 +76,30 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     const voicePath = voiceAudioUrl ? path.join(uploadDir, voiceAudioUrl.replace('/uploads/', '')) : undefined;
     const musicPath = musicAudioUrl ? path.join(uploadDir, musicAudioUrl.replace('/uploads/', '')) : undefined;
 
-    // Get settings
+    // Get settings (fadeIn/fadeOut from LLM or defaults)
     const settings = (production.settings as any) || {};
     const voiceVolume = settings.voiceVolume !== undefined ? settings.voiceVolume : 1.0;
-    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.15; // Reduced from 0.3 to 0.15
-    const fadeIn = settings.fadeIn || 0;
-    const fadeOut = settings.fadeOut || 0;
+    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.15;
+    const rawFadeIn = settings.fadeIn ?? 0.1;
+    const rawFadeOut = settings.fadeOut ?? 0.4;
+    const fadeIn = Math.max(0.02, Math.min(0.12, rawFadeIn));
+    const fadeOut = Math.max(0.1, Math.min(0.6, rawFadeOut));
+    const fadeCurve = settings.fadeCurve as 'linear' | 'exp' | 'qsin' | undefined;
     const audioDucking = settings.audioDucking !== false;
+    const duckingAmount = settings.duckingAmount !== undefined ? Math.max(0, Math.min(1, settings.duckingAmount)) : 0.35;
     const outputFormat = settings.outputFormat || 'mp3';
+    const normalizeLoudness = settings.normalizeLoudness === true;
+    const loudnessPreset = settings.loudnessPreset as 'broadcast' | 'crossPlatform' | undefined;
+    const loudnessTargetLUFS =
+      settings.loudnessTargetLUFS !== undefined
+        ? settings.loudnessTargetLUFS
+        : loudnessPreset === 'broadcast'
+          ? -24
+          : -16;
+    const loudnessTruePeak =
+      settings.loudnessTruePeak !== undefined
+        ? settings.loudnessTruePeak
+        : -2;
 
     // Generate output filename
     const filename = `production_${production.id}_${uuidv4()}.${outputFormat}`;
@@ -100,26 +114,69 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
 
     await job.updateProgress(30);
 
-    // Extend music to match voice duration if needed
+    // Align music timeline to voice: stretch or extend so music is exactly voiceDuration (beats and speech match).
     let finalMusicPath = musicPath;
     if (voicePath && musicPath) {
-      logger.info('Checking if music needs to be extended to match voice duration');
-
       const voiceDuration = await ffmpegService.getAudioDuration(voicePath);
       const musicDuration = await ffmpegService.getAudioDuration(musicPath);
 
-      logger.info(`Voice duration: ${voiceDuration}s, Music duration: ${musicDuration}s`);
+      logger.info(`Aligning music to voice: voice ${voiceDuration}s, music ${musicDuration}s`);
 
-      if (musicDuration < voiceDuration) {
-        // Extend music to match voice duration
+      if (musicDuration > voiceDuration) {
+        // Time-stretch music down to voice duration so timelines match (no hard cut; music fits the speech).
+        const stretchedFilename = `stretched_music_${uuidv4()}.mp3`;
+        const stretchedMusicPath = path.join(uploadDir, 'music', stretchedFilename);
+        logger.info(`Stretching music from ${musicDuration}s to ${voiceDuration}s for beat/speech alignment`);
+        await ffmpegService.stretchAudioToDuration(musicPath, voiceDuration, stretchedMusicPath);
+        finalMusicPath = stretchedMusicPath;
+        await job.updateProgress(50);
+      } else if (musicDuration < voiceDuration) {
+        // Extend music by looping to match voice duration.
         const extendedFilename = `extended_music_${uuidv4()}.mp3`;
         const extendedMusicPath = path.join(uploadDir, 'music', extendedFilename);
-
         logger.info(`Extending music from ${musicDuration}s to ${voiceDuration}s`);
         await ffmpegService.extendAudioDuration(musicPath, voiceDuration, extendedMusicPath);
         finalMusicPath = extendedMusicPath;
-
         await job.updateProgress(50);
+      }
+      // else same duration: use as-is
+    }
+
+    // Per-sentence music volume: when script has sentenceCues + lastTTS.sentenceTimings, apply volume curve to music
+    const sentenceCues = scriptMetadata?.sentenceCues as { index: number; musicVolumeMultiplier?: number }[] | undefined;
+    const sentenceTimings = scriptMetadata?.lastTTS?.sentenceTimings as
+      | { startSeconds: number; endSeconds: number }[]
+      | undefined;
+    const hasSentenceVolume =
+      Array.isArray(sentenceCues) &&
+      sentenceCues.length > 0 &&
+      Array.isArray(sentenceTimings) &&
+      sentenceTimings.length > 0 &&
+      finalMusicPath &&
+      voicePath;
+
+    if (hasSentenceVolume && finalMusicPath) {
+      const voiceDuration = await ffmpegService.getAudioDuration(voicePath);
+      const cueByIndex = new Map(sentenceCues!.map((c) => [c.index, c]));
+      const curve: { startSeconds: number; endSeconds: number; volumeMultiplier: number }[] = [];
+      for (let i = 0; i < sentenceTimings!.length; i++) {
+        const t = sentenceTimings![i];
+        const cue = cueByIndex.get(i);
+        const mult = cue?.musicVolumeMultiplier != null ? Math.max(0.1, Math.min(3, cue.musicVolumeMultiplier)) : 1;
+        curve.push({
+          startSeconds: Math.max(0, t.startSeconds),
+          endSeconds: Math.min(voiceDuration, t.endSeconds),
+          volumeMultiplier: mult,
+        });
+      }
+      if (curve.length > 0) {
+        const curvedFilename = `curved_music_${uuidv4()}.mp3`;
+        const curvedMusicPath = path.join(uploadDir, 'music', curvedFilename);
+        const musicDir = path.join(uploadDir, 'music');
+        if (!fs.existsSync(musicDir)) fs.mkdirSync(musicDir, { recursive: true });
+        await ffmpegService.applyVolumeCurve(finalMusicPath, curve, voiceDuration, curvedMusicPath);
+        finalMusicPath = curvedMusicPath;
+        logger.info(`Applied per-sentence music volume (${curve.length} segments) for production ${productionId}`);
       }
     }
 
@@ -131,17 +188,21 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
         volume: voiceVolume,
         fadeIn,
         fadeOut,
+        fadeCurve,
       } : undefined,
       musicInput: finalMusicPath ? {
         filePath: finalMusicPath,
         volume: musicVolume,
-        fadeIn,
-        fadeOut,
       } : undefined,
       outputPath,
       outputFormat: outputFormat as any,
       audioDucking,
-      normalize: true,
+      duckingAmount,
+      fadeCurve,
+      normalize: !normalizeLoudness,
+      normalizeLoudness,
+      loudnessTargetLUFS,
+      loudnessTruePeak,
     });
 
     await job.updateProgress(80);

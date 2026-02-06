@@ -1,15 +1,19 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
+/**
+ * User model. Uses snake_case field names to match MongoDB collection "users"
+ * (unique index on api_key, etc.).
+ */
 export interface IUser extends Document {
   email: string;
-  password: string;
-  firstName: string;
-  lastName: string;
-  apiKey: string;
+  password_hash: string;
+  first_name: string;
+  last_name: string;
+  api_key: string;
   role: string;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+  is_active: boolean;
+  created_at: Date;
+  updated_at: Date;
 }
 
 const UserSchema = new Schema<IUser>(
@@ -21,19 +25,19 @@ const UserSchema = new Schema<IUser>(
       lowercase: true,
       trim: true,
     },
-    password: {
+    password_hash: {
       type: String,
       required: true,
     },
-    firstName: {
+    first_name: {
       type: String,
       required: true,
     },
-    lastName: {
+    last_name: {
       type: String,
       required: true,
     },
-    apiKey: {
+    api_key: {
       type: String,
       required: true,
       unique: true,
@@ -43,13 +47,14 @@ const UserSchema = new Schema<IUser>(
       default: 'user',
       enum: ['user', 'admin'],
     },
-    isActive: {
+    is_active: {
       type: Boolean,
       default: true,
     },
   },
   {
-    timestamps: true,
+    timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+    collection: 'users',
   }
 );
 

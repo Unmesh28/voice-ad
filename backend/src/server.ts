@@ -1,7 +1,7 @@
 // CRITICAL: Load environment variables FIRST, before any imports
-import dotenv from 'dotenv';
 import path from 'path';
-dotenv.config({ path: path.join(process.cwd(), '.env') });
+import { loadEnv } from './config/env';
+loadEnv();
 
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';

@@ -484,65 +484,38 @@ Respond ONLY with valid JSON, no additional text.`;
   }
 
   /**
-   * Generate music prompt based on script analysis
+   * Generate music prompt based on script analysis (fallback when LLM ad-production has no music suggestion).
+   * Production-style: studio quality, -16 LUFS, leaves 1-4kHz clear for voice.
    */
   async generateMusicPrompt(scriptContent: string, duration: number): Promise<string> {
     try {
       logger.info('Generating music prompt based on script');
 
-      const prompt = `Analyze this advertisement script and create a perfect background music description for ElevenLabs music generation.
+      const analysis = await this.analyzeScript(scriptContent);
+      const stylePresets: Record<string, string> = {
+        corporate:
+          'Corporate contemporary with acoustic piano, warm strings, and subtle percussion',
+        energetic:
+          'Energetic modern pop with bright synths, driving beat, and uplifting melody',
+        calm:
+          'Calm ambient with soft piano, atmospheric pads, and minimal percussion',
+        dramatic:
+          'Dramatic cinematic with orchestral strings, powerful brass, and impactful percussion',
+      };
+      const style =
+        analysis.tone === 'professional'
+          ? 'corporate'
+          : analysis.emotion === 'excited'
+            ? 'energetic'
+            : analysis.emotion === 'calm'
+              ? 'calm'
+              : 'corporate';
+      const basePrompt = stylePresets[style] || stylePresets.corporate;
 
-Script:
-${scriptContent}
-
-Create a music prompt that:
-1. Matches the tone and emotion of the script
-2. Enhances the message without overpowering the voice
-3. Is suitable for a ${duration}-second advertisement
-4. Uses specific musical elements (instruments, tempo, mood, genre)
-
-Provide a concise music generation prompt (1-2 sentences, max 200 characters) that will create the perfect background music for this ad.
-
-Respond with ONLY the music prompt, no additional explanation.`;
-
-      const messages: OpenAIMessage[] = [
-        {
-          role: 'system',
-          content: 'You are an expert music director who creates perfect background music descriptions for advertisements.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ];
-
-      const response = await axios.post(
-        this.apiUrl,
-        {
-          model: this.model,
-          messages,
-          temperature: 0.7,
-          max_tokens: 100,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 60000,
-        }
-      );
-
-      const musicPrompt = response.data.choices[0].message.content?.trim() || '';
-
-      logger.info('Generated music prompt:', musicPrompt);
-
-      return musicPrompt;
+      return `Professional ${duration}-second advertisement music: ${basePrompt}, studio-quality production, -16 LUFS loudness, leaves 1-4kHz clear for voice, smooth fade in/out, ${analysis.tone} mood`;
     } catch (error: any) {
       logger.error('Error generating music prompt:', error.message);
-
-      // Return a safe default
-      return 'Upbeat corporate background music with soft piano and gentle percussion, professional and positive';
+      return 'Professional corporate background music with piano and strings, uplifting but subtle, studio quality';
     }
   }
 }

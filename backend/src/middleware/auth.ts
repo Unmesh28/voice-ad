@@ -37,7 +37,7 @@ export const authenticate = async (
       throw new AppError('User not found', 401);
     }
 
-    if (!user.isActive) {
+    if (!user.is_active) {
       throw new AppError('User account is inactive', 401);
     }
 

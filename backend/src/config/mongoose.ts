@@ -7,8 +7,13 @@ export const connectDB = async () => {
   try {
     await mongoose.connect(DATABASE_URL);
     logger.info('MongoDB connected successfully via Mongoose');
-  } catch (error: any) {
-    logger.error('MongoDB connection error:', error.message);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.error('MongoDB connection failed: %s', msg);
+    logger.error(
+      'Make sure MongoDB is running. Start it with: mongod (or Docker: docker run -p 27017:27017 mongo). DATABASE_URL=%s',
+      DATABASE_URL.replace(/\/\/[^@]+@/, '//***@') // hide credentials in log
+    );
     process.exit(1);
   }
 };

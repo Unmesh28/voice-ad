@@ -1,8 +1,5 @@
-import dotenv from 'dotenv';
-import path from 'path';
-
-// Load environment variables from the current working directory
-dotenv.config({ path: path.join(process.cwd(), '.env') });
+import { loadEnv } from '../config/env';
+loadEnv();
 
 import { Worker, Job } from 'bullmq';
 import { ttsGenerationQueue } from '../config/redis';
@@ -10,6 +7,7 @@ import { Script } from '../models/Script';
 import { Job as JobModel } from '../models/Job';
 import { UsageRecord } from '../models/UsageRecord';
 import elevenLabsService from '../services/tts/elevenlabs.service';
+import { alignmentToSentenceTimings, alignmentToWordTimings, buildAlignmentPayload } from '../utils/alignment-to-sentences';
 import { logger } from '../config/logger';
 import redisConnection from '../config/redis';
 import { v4 as uuidv4 } from 'uuid';
@@ -70,16 +68,44 @@ const processTTSGeneration = async (job: Job<TTSGenerationJobData>) => {
 
     await job.updateProgress(30);
 
-    // Generate speech
-    logger.info(`Generating speech for script ${scriptId}`);
-    const { filePath, audioBuffer } = await elevenLabsService.generateAndSave(
-      {
-        voiceId,
-        text: script.content,
-        voiceSettings: settings,
-      },
-      filename
-    );
+    // Prefer with-timestamps for pipeline runs (sentence-by-sentence composition)
+    const isPipelineRun = !!(script.metadata as any)?.adProductionJson;
+    let sentenceTimings: { text: string; startSeconds: number; endSeconds: number }[] | undefined;
+    let wordTimings: { text: string; startSeconds: number; endSeconds: number }[] | undefined;
+    let filePath: string;
+    let audioBuffer: Buffer;
+
+    if (isPipelineRun) {
+      try {
+        const result = await elevenLabsService.generateSpeechWithTimestamps({
+          voiceId,
+          text: script.content,
+          voiceSettings: settings,
+        });
+        audioBuffer = result.audioBuffer;
+        filePath = await elevenLabsService.saveAudioToFile(audioBuffer, filename);
+        if (result.alignment) {
+          sentenceTimings = alignmentToSentenceTimings(script.content, result.alignment);
+          wordTimings = alignmentToWordTimings(script.content, result.alignment);
+          logger.info(`Sentence timings computed for script ${scriptId}: ${sentenceTimings.length} sentences, ${wordTimings.length} words`);
+        }
+      } catch (err: any) {
+        logger.warn(`TTS with-timestamps failed, falling back to standard TTS: ${err.message}`);
+        const fallback = await elevenLabsService.generateAndSave(
+          { voiceId, text: script.content, voiceSettings: settings },
+          filename
+        );
+        filePath = fallback.filePath;
+        audioBuffer = fallback.audioBuffer;
+      }
+    } else {
+      const result = await elevenLabsService.generateAndSave(
+        { voiceId, text: script.content, voiceSettings: settings },
+        filename
+      );
+      filePath = result.filePath;
+      audioBuffer = result.audioBuffer;
+    }
 
     await job.updateProgress(80);
 
@@ -89,7 +115,19 @@ const processTTSGeneration = async (job: Job<TTSGenerationJobData>) => {
 
     const audioUrl = `/uploads/audio/${filename}`;
 
-    // Update script metadata with audio info
+    // Build canonical alignment payload when we have word timings and arc (for TTM and mix)
+    const meta = script.metadata as Record<string, unknown> | undefined;
+    const musicMeta = meta?.music ?? (meta?.adProductionJson as any)?.music;
+    const musicArc = musicMeta && typeof musicMeta === 'object' && (musicMeta as any).arc;
+    let alignment: { total_duration_seconds: number; words: unknown[]; sections: unknown[] } | undefined;
+    if (wordTimings?.length) {
+      const totalDuration =
+        wordTimings[wordTimings.length - 1].endSeconds ||
+        (sentenceTimings?.length ? sentenceTimings[sentenceTimings.length - 1].endSeconds : 0);
+      alignment = buildAlignmentPayload(wordTimings, musicArc, totalDuration);
+    }
+
+    // Update script metadata with audio info and optional sentence/word timings and alignment
     script.metadata = {
       ...(script.metadata as object),
       lastTTS: {
@@ -100,6 +138,9 @@ const processTTSGeneration = async (job: Job<TTSGenerationJobData>) => {
         estimatedDuration,
         generatedAt: new Date().toISOString(),
         jobId: job.id,
+        ...(sentenceTimings?.length ? { sentenceTimings } : {}),
+        ...(wordTimings?.length ? { wordTimings } : {}),
+        ...(alignment ? { alignment } : {}),
       },
     };
     await script.save();

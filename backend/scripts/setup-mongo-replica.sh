@@ -1,7 +1,7 @@
 #!/bin/bash
-# Configure MongoDB as a single-node replica set for Prisma
+# Configure MongoDB as a single-node replica set (optional, for transactions)
 
-echo "🔧 Configuring MongoDB as replica set for Prisma..."
+echo "🔧 Configuring MongoDB as replica set..."
 
 # Stop MongoDB if running
 sudo pkill mongod 2>/dev/null || true

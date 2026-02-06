@@ -145,12 +145,16 @@ class ElevenLabsMusicService {
     };
   }
 
+  /** ElevenLabs sound-generation API max text length (chars). */
+  private static readonly ELEVENLABS_TEXT_MAX = 450;
+
   /**
    * Validate sound generation options
    */
   validateOptions(options: SoundGenerationOptions): SoundGenerationOptions {
+    const text = (options.text || '').slice(0, ElevenLabsMusicService.ELEVENLABS_TEXT_MAX);
     return {
-      text: options.text,
+      text,
       duration_seconds: Math.max(0.5, Math.min(22, options.duration_seconds || 10)),
       prompt_influence: Math.max(0, Math.min(1, options.prompt_influence || 0.3)),
     };

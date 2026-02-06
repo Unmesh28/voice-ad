@@ -44,6 +44,48 @@ export const logger = winston.createLogger({
   ]
 });
 
+// Dedicated logger for TTM (Text-to-Music) prompts - logs FULL prompts without truncation
+const ttmPromptFormat = winston.format.printf(({ timestamp, message, ...meta }: any) => {
+  // Custom format for TTM prompts - no truncation, clean formatting
+  let output = `\n${'='.repeat(80)}\n`;
+  output += `[${timestamp}] TTM PROMPT\n`;
+  output += `${'='.repeat(80)}\n`;
+  if (meta.pipelineId) output += `Pipeline ID: ${meta.pipelineId}\n`;
+  if (meta.jobId) output += `Job ID: ${meta.jobId}\n`;
+  if (meta.provider) output += `Provider: ${meta.provider}\n`;
+  if (meta.mode) output += `Mode: ${meta.mode}\n`;
+  if (typeof meta.segmentIndex === 'number') output += `Segment: ${meta.segmentIndex + 1}/${meta.totalSegments}\n`;
+  if (meta.segmentLabel) output += `Segment Label: ${meta.segmentLabel}\n`;
+  output += `${'-'.repeat(80)}\n`;
+  output += `${message}\n`;
+  output += `${'='.repeat(80)}\n`;
+  return output;
+});
+
+export const ttmPromptLogger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    ttmPromptFormat
+  ),
+  transports: [
+    // Console output for development
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize({ all: true }),
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        ttmPromptFormat
+      )
+    }),
+    // File output for permanent storage
+    new winston.transports.File({
+      filename: 'logs/ttm-prompts.log',
+      maxsize: 10485760, // 10MB (larger since prompts can be long)
+      maxFiles: 10
+    })
+  ]
+});
+
 // Create logs directory if it doesn't exist
 import fs from 'fs';
 import path from 'path';

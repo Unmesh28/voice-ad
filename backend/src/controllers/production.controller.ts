@@ -146,14 +146,24 @@ export const mixProductionSync = asyncHandler(async (req: Request, res: Response
     const voicePath = voiceAudioUrl ? path.join(uploadDir, voiceAudioUrl.replace('/uploads/', '')) : undefined;
     const musicPath = musicAudioUrl ? path.join(uploadDir, musicAudioUrl.replace('/uploads/', '')) : undefined;
 
-    // Get settings
     const settings = (production.settings as any) || {};
     const voiceVolume = settings.voiceVolume !== undefined ? settings.voiceVolume : 1.0;
-    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.3;
-    const fadeIn = settings.fadeIn || 0;
-    const fadeOut = settings.fadeOut || 0;
+    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.15;
+    const fadeIn = settings.fadeIn ?? 0;
+    const fadeOut = settings.fadeOut ?? 0;
+    const fadeCurve = settings.fadeCurve as 'linear' | 'exp' | 'qsin' | undefined;
     const audioDucking = settings.audioDucking !== false;
+    const duckingAmount = settings.duckingAmount !== undefined ? Math.max(0, Math.min(1, settings.duckingAmount)) : 0.35;
     const outputFormat = settings.outputFormat || 'mp3';
+    const normalizeLoudness = settings.normalizeLoudness === true;
+    const loudnessPreset = settings.loudnessPreset as 'broadcast' | 'crossPlatform' | undefined;
+    const loudnessTargetLUFS =
+      settings.loudnessTargetLUFS !== undefined
+        ? settings.loudnessTargetLUFS
+        : loudnessPreset === 'broadcast'
+          ? -24
+          : -16;
+    const loudnessTruePeak = settings.loudnessTruePeak !== undefined ? settings.loudnessTruePeak : -2;
 
     // Generate output filename
     const filename = `production_${production._id}_${uuidv4()}.${outputFormat}`;
@@ -169,24 +179,24 @@ export const mixProductionSync = asyncHandler(async (req: Request, res: Response
     // Update progress
     await Production.findByIdAndUpdate(id, { progress: 30 });
 
-    // Mix audio
     await ffmpegService.mixAudio({
       voiceInput: voicePath ? {
         filePath: voicePath,
         volume: voiceVolume,
         fadeIn,
         fadeOut,
+        fadeCurve,
       } : undefined,
-      musicInput: musicPath ? {
-        filePath: musicPath,
-        volume: musicVolume,
-        fadeIn,
-        fadeOut,
-      } : undefined,
+      musicInput: musicPath ? { filePath: musicPath, volume: musicVolume } : undefined,
       outputPath,
       outputFormat: outputFormat as any,
       audioDucking,
-      normalize: true,
+      duckingAmount,
+      fadeCurve,
+      normalize: !normalizeLoudness,
+      normalizeLoudness,
+      loudnessTargetLUFS,
+      loudnessTruePeak,
     });
 
     // Get duration
@@ -311,12 +321,21 @@ export const getProduction = asyncHandler(async (req: Request, res: Response) =>
     throw new AppError('Production not found or access denied', 404);
   }
 
+  // Attach full LLM ad-production JSON from script metadata when available
+  let adProductionJson: any;
+  const scriptId = (production as any).scriptId?._id ?? (production as any).scriptId;
+  if (scriptId) {
+    const script = await Script.findById(scriptId).select('metadata').lean();
+    adProductionJson = (script as any)?.metadata?.adProductionJson;
+  }
+
   // Transform the populated fields to match expected format
   const productionWithPopulated = {
     ...production,
     project: { _id: project._id, name: project.name },
     script: production.scriptId,
     music: production.musicId,
+    ...(adProductionJson && { adProductionJson }),
   };
 
   res.json({
@@ -462,6 +481,19 @@ export const getProductionProgress = asyncHandler(async (req: Request, res: Resp
   const { id } = req.params;
 
   const progress = await productionOrchestrator.getProductionProgress(id);
+
+  // Attach full LLM ad-production JSON when script is ready (for display after script generation)
+  if (progress.scriptId) {
+    try {
+      const script = await Script.findById(progress.scriptId).select('metadata').lean();
+      const adProductionJson = (script as any)?.metadata?.adProductionJson;
+      if (adProductionJson) {
+        (progress as any).adProductionJson = adProductionJson;
+      }
+    } catch (_) {
+      // Ignore invalid ID or missing script so progress still returns
+    }
+  }
 
   res.json({
     success: true,

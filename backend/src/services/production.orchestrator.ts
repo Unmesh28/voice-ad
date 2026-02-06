@@ -1,6 +1,9 @@
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { Project } from '../models/Project';
 import { Production } from '../models/Production';
 import { Script } from '../models/Script';
+import { MusicTrack } from '../models/MusicTrack';
 import {
   scriptGenerationQueue,
   ttsGenerationQueue,
@@ -10,8 +13,10 @@ import {
 } from '../config/redis';
 import { QueueEvents } from 'bullmq';
 import redisConnection from '../config/redis';
-import { logger } from '../config/logger';
+import { logger, ttmPromptLogger } from '../config/logger';
 import voiceSelectorService from './voice-selector.service';
+import musicDirectorService from './music/music-director.service';
+import { buildSunoPromptFromScriptAnalysis } from './music/suno-prompt-builder';
 import mongoose from 'mongoose';
 
 interface QuickProductionInput {
@@ -100,10 +105,11 @@ export class ProductionOrchestrator {
       logger.info(`[Pipeline ${productionId}] Stage 1: Generating script`);
       await this.updateProductionStatus(productionId, 'GENERATING_VOICE', 10, 'Generating AI script...');
 
+      // Pass user's raw prompt and duration/tone so script worker can use generateAdProductionJSON
       const scriptJob = await scriptGenerationQueue.add('generate-script', {
         userId,
         projectId,
-        prompt: `Create a ${duration}-second ${tone} advertisement script for: ${prompt}`,
+        prompt,
         tone,
         durationSeconds: duration,
         length: duration <= 15 ? 'short' : duration <= 30 ? 'medium' : 'long',
@@ -177,56 +183,250 @@ export class ProductionOrchestrator {
       await ttsJob.waitUntilFinished(ttsQueueEvents);
       await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 50, 'Speech generated! Creating background music...');
 
-      // Stage 3: Generate Music - intelligently based on script
-      logger.info(`[Pipeline ${productionId}] Stage 3: Generating music based on script analysis`);
+      // Re-fetch script so we have lastTTS.sentenceTimings (computed by TTS worker) for sentence-level music prompt
+      const scriptAfterTts = await Script.findById(script.id);
+      const scriptForMusic = scriptAfterTts ?? script;
+      const scriptMetadata = (scriptForMusic as any)?.metadata as any;
 
-      // Generate intelligent music prompt based on script
-      let musicPrompt = `${tone} background music for advertisement`;
+      // ========== MUSIC DIRECTOR AI INTEGRATION ==========
+      // Generate professional music direction using the Music Director Service
+      logger.info(`[Pipeline ${productionId}] Generating professional music direction...`);
+
+      let musicDirection: any = null;
       try {
-        musicPrompt = await voiceSelectorService.generateMusicPrompt(script.content, duration);
-        logger.info(`[Pipeline ${productionId}] Generated music prompt: ${musicPrompt}`);
+        // Determine product category from prompt or metadata
+        const productCategory = scriptMetadata?.context?.adCategory ||
+          scriptMetadata?.adProductionJson?.context?.adCategory ||
+          'general';
+
+        // Determine target audience
+        const targetAudience = scriptMetadata?.context?.targetAudience || 'general audience';
+
+        // Determine platform (default to podcast for now, can be made configurable)
+        const platform = 'podcast';
+
+        musicDirection = await musicDirectorService.generateMusicDirection({
+          script: scriptForMusic.content,
+          duration_seconds: duration,
+          product_category: productCategory,
+          brand_tone: tone,
+          target_audience: targetAudience,
+          platform: platform as any,
+          userPrompt: prompt,
+        });
+
+        logger.info(`[Pipeline ${productionId}] Music direction generated:`, {
+          category: musicDirection.pre_analysis.music_category,
+          energyCurve: musicDirection.pre_analysis.overall_energy_curve,
+          segments: musicDirection.segments.length,
+          strategy: musicDirection.generation_strategy.recommended_approach,
+        });
+
+        // Log the music direction for debugging
+        logger.info(`[Pipeline ${productionId}] Music direction details:`, {
+          globalDirection: musicDirection.global_music_direction,
+          buttonEnding: musicDirection.button_ending_specification,
+          mixingInstructions: musicDirection.mixing_instructions,
+        });
+
       } catch (error: any) {
-        logger.warn(`[Pipeline ${productionId}] Music prompt generation failed, using default:`, error.message);
+        logger.warn(`[Pipeline ${productionId}] Music Director Service failed, falling back to basic music generation:`, error.message);
+      }
+      // ========== END MUSIC DIRECTOR AI INTEGRATION ==========
+
+      let musicPrompt = `${tone} background music for advertisement`;
+      let musicGenre = 'corporate';
+      let musicMood = tone;
+      let targetBPM: number | undefined;
+
+      // Use Music Director output if available, otherwise fall back to existing logic
+      if (musicDirection) {
+        // Use the full track prompt from Music Director
+        musicPrompt = musicDirection.full_track_prompt;
+        musicGenre = musicDirection.global_music_direction.genre;
+        musicMood = musicDirection.global_music_direction.overall_mood.join(' ');
+        targetBPM = musicDirection.global_music_direction.base_tempo_bpm;
+
+        logger.info(`[Pipeline ${productionId}] Using Music Director prompt: ${musicPrompt.slice(0, 100)}...`);
+
+        // Log full prompt to TTM logger
+        ttmPromptLogger.info(musicPrompt, {
+          pipelineId: productionId,
+          provider: 'music-director',
+          mode: musicDirection.generation_strategy.recommended_approach,
+          energyCurve: musicDirection.pre_analysis.overall_energy_curve,
+        });
+
+      } else if (scriptMetadata?.music?.prompt) {
+        musicPrompt = scriptMetadata.music.prompt;
+        if (scriptMetadata.music.genre) musicGenre = scriptMetadata.music.genre;
+        if (scriptMetadata.music.mood) musicMood = scriptMetadata.music.mood;
+        if (typeof scriptMetadata.music?.targetBPM === 'number') targetBPM = scriptMetadata.music.targetBPM;
+        logger.info(`[Pipeline ${productionId}] Using LLM music suggestion: ${musicPrompt.slice(0, 80)}...`);
+      } else {
+        try {
+          musicPrompt = await voiceSelectorService.generateMusicPrompt(scriptForMusic.content, duration);
+          logger.info(`[Pipeline ${productionId}] Generated music prompt (fallback): ${musicPrompt.slice(0, 60)}...`);
+        } catch (err: any) {
+          logger.warn(`[Pipeline ${productionId}] Music prompt fallback failed: ${err.message}`);
+        }
+      }
+
+      // Build one full composition prompt for Suno from entire script analysis (context, music including composerDirection, fades, volume, mixPreset, sentenceCues)
+      let sunoPayload: { customMode?: boolean; title?: string; style?: string; prompt: string } | undefined;
+      if (scriptMetadata?.music && typeof scriptMetadata.music === 'object') {
+        const productionContext = scriptMetadata.productionContext || scriptMetadata.adProductionJson?.context;
+        const contextForMusic =
+          productionContext &&
+            typeof productionContext.adCategory === 'string' &&
+            typeof productionContext.tone === 'string'
+            ? {
+              adCategory: productionContext.adCategory,
+              tone: productionContext.tone,
+              emotion: productionContext.emotion ?? productionContext.tone,
+              pace: productionContext.pace ?? 'moderate',
+            }
+            : undefined;
+        const sentenceTimings = scriptMetadata?.lastTTS?.sentenceTimings as
+          | { text: string; startSeconds: number; endSeconds: number }[]
+          | undefined;
+        const sunoResult = buildSunoPromptFromScriptAnalysis({
+          music: {
+            prompt: musicPrompt,
+            targetBPM: targetBPM ?? 100,
+            genre: musicGenre,
+            mood: musicMood,
+            arc: scriptMetadata.music.arc,
+            composerDirection: scriptMetadata.music.composerDirection,
+          },
+          durationSeconds: duration,
+          context: contextForMusic ?? undefined,
+          fades: scriptMetadata.fades,
+          volume: scriptMetadata.volume,
+          mixPreset: scriptMetadata.mixPreset,
+          sentenceCues: scriptMetadata.sentenceCues,
+          sentenceTimings: Array.isArray(sentenceTimings) && sentenceTimings.length > 0 ? sentenceTimings : undefined,
+        });
+        sunoPayload = {
+          customMode: sunoResult.customMode,
+          title: sunoResult.title || undefined,
+          style: sunoResult.style || undefined,
+          prompt: sunoResult.prompt,
+        };
+        if (sunoResult.customMode) {
+          logger.info(`[Pipeline ${productionId}] Suno composition from script analysis: ${sunoResult.style.slice(0, 120)}...`);
+
+          // Log FULL TTM prompt to dedicated log file (no truncation)
+          ttmPromptLogger.info(
+            sunoResult.style,
+            {
+              pipelineId: productionId,
+              provider: 'suno',
+              mode: 'custom',
+              title: sunoResult.title,
+            }
+          );
+        } else {
+          // Log non-custom mode prompt
+          ttmPromptLogger.info(
+            sunoResult.prompt,
+            {
+              pipelineId: productionId,
+              provider: 'suno',
+              mode: 'non-custom',
+            }
+          );
+        }
+      }
+
+      // Segment-based generation: Now uses smart overlapping + contextual prompting for seamless blending
+      // Enable when arc has 2+ segments for smooth, continuous music with natural transitions
+      const musicArc = scriptMetadata?.music?.arc;
+      const enableSegmentMode = Array.isArray(musicArc) && musicArc.length >= 2;
+
+      if (enableSegmentMode) {
+        logger.info(
+          `[Pipeline ${productionId}] Using segment-based generation with smart overlapping ` +
+          `for ${musicArc.length} arc segments (seamless transitions with contextual prompting)`
+        );
       }
 
       const musicJob = await musicGenerationQueue.add('generate-music', {
         userId,
-        text: musicPrompt,
-        duration_seconds: Math.min(duration, 22), // ElevenLabs max is 22s, will be extended to match voice
+        text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
+        duration_seconds: Math.min(duration, 22),
         prompt_influence: 0.3,
-        genre: 'corporate',
-        mood: tone,
+        genre: musicGenre,
+        mood: musicMood,
+        targetBPM,
+        sunoCustomMode: sunoPayload?.customMode,
+        sunoTitle: sunoPayload?.title,
+        sunoStyle: sunoPayload?.style,
+        sunoPrompt: sunoPayload?.prompt,
+        segmentBasedGeneration: enableSegmentMode,
+        arc: enableSegmentMode ? musicArc : undefined,
+        // crossfadeDuration will be calculated dynamically per segment pair
+        musicMetadata: enableSegmentMode ? {
+          instrumentation: scriptMetadata?.music?.instrumentation,
+          composerDirection: scriptMetadata?.music?.composerDirection,
+          buttonEnding: scriptMetadata?.music?.buttonEnding,
+        } : undefined,
       });
-
       const musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
-
-      if (!musicResult?.musicId) {
-        throw new Error('Music generation failed - no music ID returned');
-      }
-
+      if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
       logger.info(`[Pipeline ${productionId}] Music generated: ${musicResult.musicId}`);
-      await this.updateProductionStatus(productionId, 'MIXING', 70, 'Music generated! Mixing audio...');
-
-      // Update production with music ID
       await Production.findByIdAndUpdate(productionId, {
         musicId: new mongoose.Types.ObjectId(musicResult.musicId),
       });
 
-      // Stage 4: Mix Audio
+      await this.updateProductionStatus(productionId, 'MIXING', 70, 'Music generated! Mixing audio...');
+
+      // Stage 4: Mix Audio – use LLM fades/volume from script metadata when available
       logger.info(`[Pipeline ${productionId}] Stage 4: Mixing audio`);
+      // Loudness: crossPlatform = -16 LUFS, -2 dBTP (Spotify/podcasts); broadcast = -24 LUFS, -2 dBTP (FCC/EBU)
+      const mixSettings: Record<string, unknown> = {
+        voiceVolume: 1.0,
+        musicVolume: 0.15,
+        fadeIn: 0.1,
+        fadeOut: 0.4,
+        audioDucking: true,
+        outputFormat: 'mp3',
+        normalizeLoudness: true,
+        loudnessPreset: 'crossPlatform',
+        loudnessTargetLUFS: -16,
+        loudnessTruePeak: -2,
+      };
+      if (scriptMetadata?.fades) {
+        mixSettings.fadeIn = scriptMetadata.fades.fadeInSeconds ?? 0.1;
+        mixSettings.fadeOut = scriptMetadata.fades.fadeOutSeconds ?? 0.4;
+        if (scriptMetadata.fades.curve) mixSettings.fadeCurve = scriptMetadata.fades.curve;
+      }
+      if (scriptMetadata?.volume) {
+        mixSettings.voiceVolume = scriptMetadata.volume.voiceVolume ?? 1.0;
+        mixSettings.musicVolume = scriptMetadata.volume.musicVolume ?? 0.15;
+        if (scriptMetadata.volume.segments?.length) mixSettings.volumeSegments = scriptMetadata.volume.segments;
+      }
+      if (scriptMetadata?.mixPreset) {
+        mixSettings.mixPreset = scriptMetadata.mixPreset;
+        const presetDucking: Record<string, number> = {
+          voiceProminent: 0.6,
+          balanced: 0.35,
+          musicEmotional: 0.2,
+        };
+        mixSettings.duckingAmount = presetDucking[scriptMetadata.mixPreset] ?? 0.35;
+      } else {
+        mixSettings.duckingAmount = 0.35;
+      }
+
+      const productionDoc = await Production.findById(productionId).lean();
+      const existingSettings = (productionDoc?.settings as Record<string, unknown>) || {};
+      await Production.findByIdAndUpdate(productionId, {
+        settings: { ...existingSettings, ...mixSettings },
+      });
+
       const mixingJob = await audioMixingQueue.add('mix-audio', {
         userId,
         productionId,
-        scriptId: script.id,
-        musicId: musicResult.musicId,
-        settings: {
-          voiceVolume: 1.0,  // 100% - full voice volume for clarity
-          musicVolume: 0.15, // 15% - reduced music volume to be background only
-          fadeIn: 0.1,       // 100ms smooth fade in at start
-          fadeOut: 0.1,      // 100ms smooth fade out at end
-          ducking: true,
-          format: 'mp3',
-        },
       });
 
       const mixingResult = await mixingJob.waitUntilFinished(mixingQueueEvents);
@@ -251,7 +451,6 @@ export class ProductionOrchestrator {
       await this.updateProductionStatus(productionId, 'FAILED', 0, error.message || 'Pipeline execution failed');
       throw error;
     } finally {
-      // Clean up QueueEvents connections
       await scriptQueueEvents.close();
       await ttsQueueEvents.close();
       await musicQueueEvents.close();
@@ -281,12 +480,28 @@ export class ProductionOrchestrator {
       FAILED: 'failed',
     };
 
+    // When scriptId is populated it's a full document; extract id so progress.scriptId is always an ID string.
+    const scriptId =
+      production.scriptId != null
+        ? (typeof (production.scriptId as any)._id !== 'undefined'
+          ? (production.scriptId as any)._id
+          : production.scriptId
+        ).toString()
+        : undefined;
+    const musicId =
+      production.musicId != null
+        ? (typeof (production.musicId as any)._id !== 'undefined'
+          ? (production.musicId as any)._id
+          : production.musicId
+        ).toString()
+        : undefined;
+
     return {
       stage: stageMap[production.status] || 'script',
       progress: production.progress,
       message: this.getStatusMessage(production.status, production.progress),
-      scriptId: production.scriptId?.toString(),
-      musicId: production.musicId?.toString(),
+      scriptId,
+      musicId,
       productionId: production.id,
       outputUrl: production.outputUrl || undefined,
     };

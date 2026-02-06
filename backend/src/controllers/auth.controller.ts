@@ -22,26 +22,26 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   // Generate unique API key
   const apiKey = `vad_${randomBytes(32).toString('hex')}`;
 
-  // Create user
+  // Create user (snake_case fields for users collection)
   const user = await User.create({
     email,
-    password: passwordHash,
-    firstName,
-    lastName,
-    apiKey,
+    password_hash: passwordHash,
+    first_name: firstName ?? '',
+    last_name: lastName ?? '',
+    api_key: apiKey,
   });
 
-  // Create user object for token
+  // Create user object for token (API uses camelCase)
   const userForToken = {
     id: user._id.toString(),
     email: user.email,
     role: 'user',
-    firstName: user.firstName,
-    lastName: user.lastName,
-    apiKey: user.apiKey,
-    isActive: user.isActive,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
+    firstName: user.first_name,
+    lastName: user.last_name,
+    apiKey: user.api_key,
+    isActive: user.is_active,
+    createdAt: user.created_at,
+    updatedAt: user.updated_at,
     passwordHash: '',
     lastLoginAt: null,
   };
@@ -52,15 +52,14 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 
   logger.info(`New user registered: ${user.email}`);
 
-  // Remove password from response
   const userResponse = {
     id: user._id,
     email: user.email,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    apiKey: user.apiKey,
-    isActive: user.isActive,
-    createdAt: user.createdAt,
+    firstName: user.first_name,
+    lastName: user.last_name,
+    apiKey: user.api_key,
+    isActive: user.is_active,
+    createdAt: user.created_at,
   };
 
   res.status(201).json({
@@ -84,49 +83,49 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError('Invalid email or password', 401);
   }
 
-  // Check if user is active
-  if (!user.isActive) {
+  if (!user.is_active) {
     throw new AppError('Account is inactive', 401);
   }
 
-  // Verify password
-  const isPasswordValid = await comparePassword(password, user.password);
+  if (!user.password_hash) {
+    logger.warn('User has no password set', { email: user.email });
+    throw new AppError('Invalid email or password', 401);
+  }
+
+  const isPasswordValid = await comparePassword(password, user.password_hash);
 
   if (!isPasswordValid) {
     logger.warn('Invalid email or password');
     throw new AppError('Invalid email or password', 401);
   }
 
-  // Create user object for token
   const userForToken = {
     id: user._id.toString(),
     email: user.email,
     role: 'user',
-    firstName: user.firstName,
-    lastName: user.lastName,
-    apiKey: user.apiKey,
-    isActive: user.isActive,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
+    firstName: user.first_name,
+    lastName: user.last_name,
+    apiKey: user.api_key,
+    isActive: user.is_active,
+    createdAt: user.created_at,
+    updatedAt: user.updated_at,
     passwordHash: '',
     lastLoginAt: null,
   };
 
-  // Generate tokens
   const token = generateToken(userForToken as any);
   const refreshToken = generateRefreshToken(userForToken as any);
 
   logger.info(`User logged in: ${user.email}`);
 
-  // Remove password from response
   const userResponse = {
     id: user._id,
     email: user.email,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    apiKey: user.apiKey,
-    isActive: user.isActive,
-    createdAt: user.createdAt,
+    firstName: user.first_name,
+    lastName: user.last_name,
+    apiKey: user.api_key,
+    isActive: user.is_active,
+    createdAt: user.created_at,
   };
 
   res.json({
@@ -152,21 +151,20 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
   // Get user
   const user = await User.findById(decoded.userId);
 
-  if (!user || !user.isActive) {
+  if (!user || !user.is_active) {
     throw new AppError('Invalid refresh token', 401);
   }
 
-  // Create user object for token
   const userForToken = {
     id: user._id.toString(),
     email: user.email,
     role: 'user',
-    firstName: user.firstName,
-    lastName: user.lastName,
-    apiKey: user.apiKey,
-    isActive: user.isActive,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
+    firstName: user.first_name,
+    lastName: user.last_name,
+    apiKey: user.api_key,
+    isActive: user.is_active,
+    createdAt: user.created_at,
+    updatedAt: user.updated_at,
     passwordHash: '',
     lastLoginAt: null,
   };

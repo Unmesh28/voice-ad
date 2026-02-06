@@ -9,7 +9,7 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError('User not authenticated', 401);
   }
 
-  const { password: _, ...userWithoutPassword } = req.user.toObject();
+  const { password_hash: _, ...userWithoutPassword } = req.user.toObject();
 
   res.json({
     success: true,
@@ -27,8 +27,8 @@ export const updateProfile = asyncHandler(async (req: Request, res: Response) =>
   const updatedUser = await User.findByIdAndUpdate(
     req.user._id,
     {
-      firstName,
-      lastName,
+      first_name: firstName,
+      last_name: lastName,
     },
     { new: true }
   );
@@ -37,7 +37,7 @@ export const updateProfile = asyncHandler(async (req: Request, res: Response) =>
     throw new AppError('User not found', 404);
   }
 
-  const { password: _, ...userWithoutPassword } = updatedUser.toObject();
+  const { password_hash: _, ...userWithoutPassword } = updatedUser.toObject();
 
   res.json({
     success: true,
@@ -54,17 +54,16 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
 
   // Verify current password
   const { comparePassword } = await import('../utils/password');
-  const isValid = await comparePassword(currentPassword, req.user.password);
+  const isValid = await comparePassword(currentPassword, req.user.password_hash);
 
   if (!isValid) {
     throw new AppError('Current password is incorrect', 400);
   }
 
   // Hash new password
-  const password = await hashPassword(newPassword);
+  const hashed = await hashPassword(newPassword);
 
-  // Update password
-  await User.findByIdAndUpdate(req.user._id, { password });
+  await User.findByIdAndUpdate(req.user._id, { password_hash: hashed });
 
   res.json({
     success: true,

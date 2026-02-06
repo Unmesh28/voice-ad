@@ -85,6 +85,13 @@ export const schemas = {
     count: Joi.number().min(1).max(5).optional(),
   }),
 
+  /** Body for unified ad production JSON (script + context + music + fades + volume) */
+  generateAdProductionJSON: Joi.object({
+    prompt: Joi.string().min(10).max(2000).required(),
+    durationSeconds: Joi.number().min(5).max(120).optional(),
+    tone: Joi.string().max(100).optional(),
+  }),
+
   generateTTS: Joi.object({
     scriptId: Joi.string().uuid().required(),
     voiceId: Joi.string().required(),
@@ -144,8 +151,12 @@ export const schemas = {
       musicVolume: Joi.number().min(0).max(2).optional(),
       fadeIn: Joi.number().min(0).max(10).optional(),
       fadeOut: Joi.number().min(0).max(10).optional(),
+      fadeCurve: Joi.string().valid('linear', 'exp', 'qsin').optional(),
       audioDucking: Joi.boolean().optional(),
+      duckingAmount: Joi.number().min(0).max(1).optional(),
       outputFormat: Joi.string().valid('mp3', 'wav', 'aac').optional(),
+      normalizeLoudness: Joi.boolean().optional(),
+      loudnessTargetLUFS: Joi.number().min(-60).max(0).optional(),
     }).optional(),
   }),
 
@@ -158,8 +169,12 @@ export const schemas = {
       musicVolume: Joi.number().min(0).max(2).optional(),
       fadeIn: Joi.number().min(0).max(10).optional(),
       fadeOut: Joi.number().min(0).max(10).optional(),
+      fadeCurve: Joi.string().valid('linear', 'exp', 'qsin').optional(),
       audioDucking: Joi.boolean().optional(),
+      duckingAmount: Joi.number().min(0).max(1).optional(),
       outputFormat: Joi.string().valid('mp3', 'wav', 'aac').optional(),
+      normalizeLoudness: Joi.boolean().optional(),
+      loudnessTargetLUFS: Joi.number().min(-60).max(0).optional(),
     }).optional(),
   }),
 };

@@ -27,6 +27,18 @@ interface TTSOptions {
   outputFormat?: 'mp3_44100_128' | 'mp3_44100_192' | 'pcm_16000' | 'pcm_22050' | 'pcm_24000' | 'pcm_44100';
 }
 
+/** Character-level alignment from ElevenLabs with-timestamps endpoint */
+export interface ElevenLabsAlignment {
+  characters: string[];
+  character_start_times_seconds: number[];
+  character_end_times_seconds: number[];
+}
+
+export interface SpeechWithTimestampsResult {
+  audioBuffer: Buffer;
+  alignment: ElevenLabsAlignment | null;
+}
+
 class ElevenLabsService {
   private apiKey: string;
   private apiUrl: string;
@@ -41,35 +53,53 @@ class ElevenLabsService {
   }
 
   /**
-   * Get all available voices
+   * Get all available voices with retry logic
    */
-  async getVoices(): Promise<Voice[]> {
-    try {
-      logger.info('Fetching available voices from ElevenLabs');
+  async getVoices(retries: number = 3): Promise<Voice[]> {
+    let lastError: any;
 
-      const response = await axios.get(`${this.apiUrl}/voices`, {
-        headers: {
-          'xi-api-key': this.apiKey,
-        },
-        timeout: 30000, // Increased to 30 seconds for better reliability
-      });
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        logger.info(`Fetching available voices from ElevenLabs (attempt ${attempt}/${retries})`);
 
-      const voices = response.data.voices || [];
-      logger.info(`Retrieved ${voices.length} voices from ElevenLabs`);
+        const response = await axios.get(`${this.apiUrl}/voices`, {
+          headers: {
+            'xi-api-key': this.apiKey,
+          },
+          timeout: 90000, // Increased to 90 seconds for better reliability
+        });
 
-      return voices;
-    } catch (error: any) {
-      logger.error('Error fetching voices from ElevenLabs:', {
-        message: error.message,
-        response: error.response?.data,
-      });
+        const voices = response.data.voices || [];
+        logger.info(`Retrieved ${voices.length} voices from ElevenLabs`);
 
-      if (error.response?.status === 401) {
-        throw new Error('Invalid ElevenLabs API key');
+        return voices;
+      } catch (error: any) {
+        lastError = error;
+
+        logger.error(`Error fetching voices from ElevenLabs (attempt ${attempt}/${retries}):`, {
+          message: error.message,
+          response: error.response?.data,
+        });
+
+        if (error.response?.status === 401) {
+          throw new Error('Invalid ElevenLabs API key');
+        }
+
+        // If this is not the last attempt and it's a timeout, retry
+        if (attempt < retries && (error.code === 'ECONNABORTED' || error.message.includes('timeout'))) {
+          logger.info(`Retrying voice fetch in 2 seconds...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          continue;
+        }
+
+        // If it's the last attempt or a non-timeout error, throw
+        if (attempt === retries) {
+          throw new Error(`Failed to fetch voices after ${retries} attempts: ${error.message}`);
+        }
       }
-
-      throw new Error(`Failed to fetch voices: ${error.message}`);
     }
+
+    throw new Error(`Failed to fetch voices: ${lastError?.message || 'Unknown error'}`);
   }
 
   /**
@@ -83,7 +113,7 @@ class ElevenLabsService {
         headers: {
           'xi-api-key': this.apiKey,
         },
-        timeout: 30000, // Increased to 30 seconds for better reliability
+        timeout: 60000, // Increased to 60 seconds for better reliability
       });
 
       return response.data;
@@ -163,6 +193,94 @@ class ElevenLabsService {
       }
 
       throw new Error(`Failed to generate speech: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate speech and get character-level alignment (for sentence-by-sentence composition).
+   * Uses POST /v1/text-to-speech/:voice_id/with-timestamps. Returns audio + alignment or null if missing.
+   */
+  async generateSpeechWithTimestamps(options: TTSOptions): Promise<SpeechWithTimestampsResult> {
+    const {
+      voiceId,
+      text,
+      modelId = 'eleven_v3',
+      voiceSettings = {
+        stability: 0.5,
+        similarity_boost: 0.75,
+        style: 0.0,
+        use_speaker_boost: true,
+      },
+      outputFormat = 'mp3_44100_128',
+    } = options;
+
+    try {
+      logger.info('Generating speech with timestamps (ElevenLabs)', {
+        voiceId,
+        textLength: text.length,
+        modelId,
+      });
+
+      const response = await axios.post<{
+        audio_base64?: string;
+        alignment?: ElevenLabsAlignment;
+        normalized_alignment?: ElevenLabsAlignment;
+      }>(
+        `${this.apiUrl}/text-to-speech/${voiceId}/with-timestamps`,
+        {
+          text,
+          model_id: modelId,
+          voice_settings: voiceSettings,
+        },
+        {
+          headers: {
+            'xi-api-key': this.apiKey,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          params: {
+            output_format: outputFormat,
+          },
+          timeout: 120000,
+        }
+      );
+
+      const audioBase64 = response.data?.audio_base64;
+      const alignment = response.data?.alignment ?? response.data?.normalized_alignment ?? null;
+
+      if (!audioBase64) {
+        throw new Error('ElevenLabs with-timestamps returned no audio_base64');
+      }
+
+      const audioBuffer = Buffer.from(audioBase64, 'base64');
+      logger.info('Speech with timestamps generated', {
+        audioSize: audioBuffer.length,
+        characters: text.length,
+        hasAlignment: !!alignment,
+      });
+
+      return {
+        audioBuffer,
+        alignment: alignment && alignment.characters?.length ? alignment : null,
+      };
+    } catch (error: any) {
+      logger.error('Error generating speech with timestamps:', {
+        message: error.message,
+        response: error.response?.data,
+        voiceId,
+      });
+
+      if (error.response?.status === 401) {
+        throw new Error('Invalid ElevenLabs API key');
+      } else if (error.response?.status === 400) {
+        throw new Error('Invalid request parameters');
+      } else if (error.response?.status === 429) {
+        throw new Error('ElevenLabs rate limit exceeded. Please try again later.');
+      } else if (error.response?.status === 500) {
+        throw new Error('ElevenLabs service error. Please try again later.');
+      }
+
+      throw new Error(`Failed to generate speech with timestamps: ${error.message}`);
     }
   }
 
