@@ -249,6 +249,84 @@ class SfxService {
   }
 
   /**
+   * Auto-enrich segments with SFX where the LLM didn't add them but they'd
+   * enhance the ad. Mutates the segments array in place.
+   *
+   * Rules:
+   *   1. Transition whoosh: when going from music_solo → voiceover_*
+   *   2. CTA chime: voiceover segments labeled as CTA/call-to-action
+   *   3. Deal/offer punch: voiceover segments about deals/offers/discounts
+   *   4. Max AUTO_SFX_LIMIT auto SFX per ad (don't clutter)
+   *   5. Skip segments that already have SFX
+   */
+  enrichSegmentsWithAutoSfx(segments: {
+    segmentIndex: number;
+    type: string;
+    label: string;
+    duration: number;
+    sfx: { description: string; volume?: number | null } | null;
+  }[]): number {
+    const AUTO_SFX_LIMIT = 4;
+    let added = 0;
+
+    // Count existing SFX to stay within a reasonable total
+    const existingSfxCount = segments.filter((s) => s.sfx?.description).length;
+    const maxToAdd = Math.max(0, AUTO_SFX_LIMIT - existingSfxCount);
+
+    if (maxToAdd === 0) {
+      logger.info('Auto-SFX: segments already have enough SFX, skipping enrichment');
+      return 0;
+    }
+
+    for (let i = 0; i < segments.length && added < maxToAdd; i++) {
+      const seg = segments[i];
+      const prev = i > 0 ? segments[i - 1] : null;
+
+      // Skip if segment already has SFX
+      if (seg.sfx?.description) continue;
+
+      const labelLower = seg.label.toLowerCase();
+
+      // Rule 1: Transition whoosh — music_solo → voiceover
+      if (
+        prev &&
+        prev.type === 'music_solo' &&
+        (seg.type === 'voiceover_with_music' || seg.type === 'voiceover_only')
+      ) {
+        seg.sfx = { description: 'quick cinematic whoosh transition sweep', volume: 0.6 };
+        added++;
+        logger.info(`Auto-SFX: added transition whoosh to segment ${seg.segmentIndex} "${seg.label}"`);
+        continue;
+      }
+
+      // Rule 2: CTA chime — segments that are CTA/call-to-action
+      if (
+        /\bcta\b|call.to.action|act.now|order.now|buy.now|shop.now|visit/i.test(labelLower) &&
+        (seg.type === 'voiceover_with_music' || seg.type === 'voiceover_only')
+      ) {
+        seg.sfx = { description: 'bright notification chime ding', volume: 0.5 };
+        added++;
+        logger.info(`Auto-SFX: added CTA chime to segment ${seg.segmentIndex} "${seg.label}"`);
+        continue;
+      }
+
+      // Rule 3: Deal/offer punch — segments about deals, discounts, offers
+      if (
+        /deal|offer|discount|sale|price|save|free|limited|special/i.test(labelLower) &&
+        (seg.type === 'voiceover_with_music' || seg.type === 'voiceover_only')
+      ) {
+        seg.sfx = { description: 'cash register cha-ching', volume: 0.6 };
+        added++;
+        logger.info(`Auto-SFX: added deal SFX to segment ${seg.segmentIndex} "${seg.label}"`);
+        continue;
+      }
+    }
+
+    logger.info(`Auto-SFX enrichment: added ${added} SFX (${existingSfxCount} existing, ${added + existingSfxCount} total)`);
+    return added;
+  }
+
+  /**
    * Build a reasonable prompt from a raw description + category.
    * Adds "sound effect" framing so ElevenLabs generates a sound, not music.
    */

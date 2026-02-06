@@ -305,14 +305,15 @@ class TimelineComposerService {
     }
 
     // ── Align music ending with voiceover ending ───────────────────────
-    // Find the last voice entry and trim trailing music-only segments
-    // so the ad doesn't have music playing alone after the voice ends.
+    // 1. Trim trailing music-only segments so the ad ends with the voice.
+    // 2. Add a smooth resolving fade so music doesn't cut abruptly —
+    //    it fades down during the last ~2s of the final voiceover.
     const lastVoiceEntry = [...timeline].reverse().find((e) => e.type === 'voice');
     const lastVoiceEnd = lastVoiceEntry
       ? lastVoiceEntry.startTime + lastVoiceEntry.duration
       : cursor;
 
-    const MUSIC_TAIL = 0.5; // allow 0.5s of music after voice for a clean fade
+    const MUSIC_TAIL = 0.3; // tiny tail for final fade cleanup
 
     if (cursor > lastVoiceEnd + MUSIC_TAIL && lastVoiceEntry) {
       const newDuration = lastVoiceEnd + MUSIC_TAIL;
@@ -333,6 +334,50 @@ class TimelineComposerService {
       }
 
       cursor = newDuration;
+    }
+
+    // ── Resolving fade: smooth music fade-out during final voiceover ──
+    // Instead of the music cutting at voice end, gradually reduce the
+    // music volume over the last RESOLVE_DURATION seconds. This creates
+    // 4 stepped volume reductions that applyVolumeCurve turns into
+    // smooth ramps, so music naturally resolves with the voice.
+    const RESOLVE_DURATION = 2.0; // fade music over last 2s
+    const RESOLVE_STEPS = 4;
+
+    if (lastVoiceEntry && musicVolumeSegments.length > 0) {
+      const resolveStart = Math.max(0, lastVoiceEnd - RESOLVE_DURATION);
+
+      // Find the music volume segment that covers the resolve period
+      const lastMvsIdx = musicVolumeSegments.length - 1;
+      const lastMvs = musicVolumeSegments[lastMvsIdx];
+
+      if (lastMvs && lastMvs.startTime < resolveStart && lastMvs.endTime > resolveStart) {
+        const originalVol = lastMvs.volume;
+        const originalEnd = lastMvs.endTime;
+
+        // Truncate the existing segment to end where the resolve starts
+        lastMvs.endTime = resolveStart;
+
+        // Add stepped fade-down segments
+        const stepDuration = (originalEnd - resolveStart) / RESOLVE_STEPS;
+        for (let step = 0; step < RESOLVE_STEPS; step++) {
+          const stepStart = resolveStart + step * stepDuration;
+          const stepEnd = stepStart + stepDuration;
+          // Fade from originalVol down to near-zero (0.1 is applyVolumeCurve min)
+          const stepVol = originalVol * (1 - ((step + 1) / RESOLVE_STEPS) * 0.9);
+          musicVolumeSegments.push({
+            startTime: stepStart,
+            endTime: stepEnd,
+            volume: Math.max(0.1, stepVol),
+            behavior: 'resolving',
+          });
+        }
+
+        logger.info(
+          `Music resolving fade: ${originalVol.toFixed(2)} → 0.1 over ${RESOLVE_DURATION}s ` +
+          `(${resolveStart.toFixed(1)}s → ${originalEnd.toFixed(1)}s)`
+        );
+      }
     }
 
     return { timeline, musicVolumeSegments, totalDuration: cursor, lastVoiceEndTime: lastVoiceEnd };
