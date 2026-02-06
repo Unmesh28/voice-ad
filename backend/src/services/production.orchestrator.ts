@@ -23,6 +23,7 @@ import sfxService from './sfx/sfx.service';
 import timelineComposerService from './audio/timeline-composer.service';
 import ffmpegService from './audio/ffmpeg.service';
 import type { AdCreativePlan } from '../types/ad-format';
+import musicQualityService from './music/music-quality.service';
 import mongoose from 'mongoose';
 
 interface QuickProductionInput {
@@ -372,20 +373,31 @@ export class ProductionOrchestrator {
       if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
       logger.info(`[Pipeline ${productionId}] Music generated: ${musicResult.musicId}`);
 
-      // ========== MUSIC QUALITY GATE (Tier 4) ==========
-      // Quick check: is the generated track's duration within acceptable range?
-      // If it's way too short (>30% below requested), regenerate once.
+      // ========== MUSIC QUALITY GATE ==========
+      // Multi-dimensional quality scoring: duration, loudness, silence, dynamics.
+      // If score is below threshold, regenerate once.
       const requestedDuration = musicRequestDuration;
       try {
         const musicTrack = await MusicTrack.findById(musicResult.musicId);
-        if (musicTrack?.duration && requestedDuration > 0) {
-          const actualDuration = musicTrack.duration;
-          const durationRatio = actualDuration / requestedDuration;
-          logger.info(`[Pipeline ${productionId}] Quality gate: requested=${requestedDuration}s, actual=${actualDuration}s, ratio=${durationRatio.toFixed(2)}`);
+        if (musicTrack?.fileUrl && requestedDuration > 0) {
+          const trackPath = path.join(
+            path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads'),
+            musicTrack.fileUrl.replace('/uploads/', '')
+          );
+          const quality = await musicQualityService.scoreTrack({
+            musicPath: trackPath,
+            expectedDuration: requestedDuration,
+            genre: musicGenre,
+          });
 
-          if (durationRatio < 0.7) {
-            logger.warn(`[Pipeline ${productionId}] Music too short (${actualDuration}s vs ${requestedDuration}s). Regenerating once...`);
-            await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 55, 'Regenerating music for better match...');
+          logger.info(`[Pipeline ${productionId}] Quality gate: score=${quality.score}, ${quality.summary}`, {
+            dimensions: quality.dimensions,
+            measurements: quality.measurements,
+          });
+
+          if (!quality.acceptable) {
+            logger.warn(`[Pipeline ${productionId}] Music quality below threshold (${quality.score}). Regenerating...`);
+            await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 55, 'Regenerating music for better quality...');
 
             const retryJob = await musicGenerationQueue.add('generate-music', {
               userId,
@@ -682,15 +694,25 @@ export class ProductionOrchestrator {
     let musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
     if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
 
-    // Quality gate (same as legacy)
+    // Quality gate — multi-dimensional scoring
     try {
-      const musicTrack = await MusicTrack.findById(musicResult.musicId);
-      if (musicTrack?.duration && musicRequestDuration > 0) {
-        const durationRatio = musicTrack.duration / musicRequestDuration;
-        if (durationRatio < 0.7) {
-          logger.warn(`[Pipeline ${productionId}] Music too short (${musicTrack.duration}s vs ${musicRequestDuration}s). Regenerating...`);
-          await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 60, 'Regenerating music for better match...');
-          // Retry with single-track (more reliable for duration matching)
+      const musicTrackForGate = await MusicTrack.findById(musicResult.musicId);
+      if (musicTrackForGate?.fileUrl && musicRequestDuration > 0) {
+        const trackPath = path.join(uploadDir, musicTrackForGate.fileUrl.replace('/uploads/', ''));
+        const quality = await musicQualityService.scoreTrack({
+          musicPath: trackPath,
+          expectedDuration: musicRequestDuration,
+          genre: musicGenre,
+        });
+
+        logger.info(`[Pipeline ${productionId}] Quality gate: score=${quality.score}, ${quality.summary}`, {
+          dimensions: quality.dimensions,
+        });
+
+        if (!quality.acceptable) {
+          logger.warn(`[Pipeline ${productionId}] Music quality below threshold (${quality.score}). Regenerating...`);
+          await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 60, 'Regenerating music for better quality...');
+          // Retry with single-track (more reliable)
           const retryJob = await musicGenerationQueue.add('generate-music', {
             userId,
             text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
