@@ -6,6 +6,7 @@ import {
   getAdProductionExampleJSONString,
   getOpenAIAdProductionJsonSchema,
 } from '../../types/ad-production';
+import { getTemplateSummaryForPrompt } from '../../types/ad-format';
 
 interface GenerateScriptParams {
   prompt: string;
@@ -283,7 +284,24 @@ MUSICAL STRUCTURE (for bar-aware blueprint):
 - Volume: You MUST set volume.voiceVolume (0.8–1.0) and volume.musicVolume (0.1–0.25). Add volume.segments for "music_up" at open and "voice_up" at CTA when it helps.
 - Sentence-by-sentence: Add "sentenceCues" (array of { index, musicCue, musicVolumeMultiplier, musicDirection?, musicalFunction? })—one object per sentence. musicCue = short label (hook, excitement, highlight, pause, warm, cta). musicVolumeMultiplier 0.7–1.3 so music ducks or swells per sentence. Optional musicDirection = one short phrase per sentence (e.g. swell, staccato, hold, hit on downbeat, quiet under) for the music generator. Optional musicalFunction = the structural role of this sentence: "hook" (attention-grab), "build" (rising energy), "peak" (climax), "resolve" (settling), "transition" (bridging between sections), "pause" (musical breathing point).
 
-TOP-LEVEL KEYS: script, context, music, fades, volume, version (optional), mixPreset (optional), sentenceCues (optional).
+SEGMENT-BASED AD FORMAT (adFormat — REQUIRED):
+You MUST output an "adFormat" object that breaks the ad into ORDERED SEGMENTS. Each segment defines what audio layers are active (voice, music, SFX) and how they behave. This replaces the flat "voice over background music" structure with a creative timeline.
+
+STEP 1: Choose a template that best fits the brief. Available templates:
+${getTemplateSummaryForPrompt()}
+
+STEP 2: Fill in the template's segments with actual content:
+- For each segment, set: type, label, duration, voiceover (text + style or null), music (description + behavior + volume or null), sfx (description or null), transition.
+- The "script" field should contain the FULL concatenated voiceover text (all voiceover segments joined). The adFormat segments contain the per-segment breakdown.
+- Segment durations must sum to totalDuration (= context.durationSeconds).
+- music_solo segments: music is NOT null, voiceover IS null.
+- voiceover_with_music segments: both voiceover and music are NOT null.
+- sfx_hit segments: sfx is NOT null; voiceover and music are both null.
+- For culturally-targeted ads (e.g. Punjabi, Latin, Japanese), use "cultural_hook" template and set culturalStyle + instruments on music segments.
+
+STEP 3: Set overallMusicDirection (genre, mood, BPM, cultural style for the whole ad) and culturalContext if applicable.
+
+TOP-LEVEL KEYS: script, context, music, fades, volume, version (optional), mixPreset (optional), sentenceCues (optional), adFormat (REQUIRED).
 
 1. "script" (string): Ad script with ElevenLabs v3 tags only. Word count must fit the duration.
 
@@ -325,13 +343,14 @@ ${getAdProductionExampleJSONString()}`;
       `4. Output music.prompt, music.targetBPM, music.genre, music.mood, music.composerDirection (max 300 chars), music.instrumentation (drums, bass, mids, effects—ensure mids leave 1-4kHz clear for voice), optional music.buttonEnding (for clean endings, not fade-outs), music.musicalStructure (introType, introBars, bodyFeel, peakMoment, endingType, outroBars, keySignature, phraseLength), and music.arc with 2–4 segments covering 0–${duration}s.`,
       `5. Think like a professional Music Director: Apply the emotion-first principle. Before composing, identify the emotional journey (e.g. Frustration → Curiosity → Relief → Action). Map key sync points: brand name mention (subtle lift), key benefit (peak energy), CTA (resolve). Assign energy level (1-10) to each arc segment that serves the emotion at that moment (e.g. intro=3, peak=7, resolve=5). Ensure instrumentation density matches energy (low=sparse, high=full).`,
       `6. Add sentenceCues: one per sentence (index 0, 1, 2...), with musicCue (e.g. hook, excitement, highlight, cta), musicVolumeMultiplier (0.7–1.3), optional musicDirection (e.g. swell, staccato, hold, hit on downbeat), and musicalFunction (hook, build, peak, resolve, transition, pause).`,
+      `7. REQUIRED: Output "adFormat" — choose the best template for this brief (classic_radio, cultural_hook, sfx_driven, storytelling, high_energy_sale, or "custom") and fill in each segment with content. Segment durations must sum to ${duration}s. For culturally-targeted briefs, prefer "cultural_hook" template and set culturalStyle/instruments.`,
     ];
     if (input.tone) {
       parts.push(`- Tone: ${input.tone}`);
     }
     parts.push(
       ``,
-      `Respond with a single JSON object: script (ElevenLabs audio tags only), context, music (composer-led arc + prompt + BPM), fades, volume, mixPreset, sentenceCues. No other text.`
+      `Respond with a single JSON object: script (ElevenLabs audio tags only), context, music (composer-led arc + prompt + BPM), fades, volume, mixPreset, sentenceCues, adFormat (segment-based creative plan). No other text.`
     );
     return parts.join('\n');
   }

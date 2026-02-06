@@ -88,8 +88,9 @@ const processScriptGeneration = async (job: Job<ScriptGenerationJobData>) => {
           fades: fullResponse.fades,
           volume: fullResponse.volume,
           mixPreset: fullResponse.mixPreset,
+          adFormat: fullResponse.adFormat,
           llmResponseVersion: fullResponse.version,
-          /** Full LLM ad-production JSON for display/debug (script, context, music, fades, volume). */
+          /** Full LLM ad-production JSON for display/debug (script, context, music, fades, volume, adFormat). */
           adProductionJson: fullResponse as AdProductionLLMResponse,
         },
       });

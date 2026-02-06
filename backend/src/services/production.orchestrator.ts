@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { Project } from '../models/Project';
 import { Production } from '../models/Production';
@@ -17,6 +18,11 @@ import { logger, ttmPromptLogger } from '../config/logger';
 import voiceSelectorService from './voice-selector.service';
 import { buildSunoPromptFromScriptAnalysis, buildSunoPromptFromBlueprint } from './music/suno-prompt-builder';
 import { generateMusicalBlueprint, type MusicalBlueprint } from './music/musical-blueprint.service';
+import segmentTTSService from './tts/segment-tts.service';
+import sfxService from './sfx/sfx.service';
+import timelineComposerService from './audio/timeline-composer.service';
+import ffmpegService from './audio/ffmpeg.service';
+import type { AdCreativePlan } from '../types/ad-format';
 import mongoose from 'mongoose';
 
 interface QuickProductionInput {
@@ -166,6 +172,27 @@ export class ProductionOrchestrator {
 
       await this.updateProductionStatus(productionId, 'GENERATING_VOICE', 30, 'Voice selected! Generating speech...');
 
+      // ========== CHECK FOR SEGMENT-BASED AD FORMAT ==========
+      const adFormat = (script.metadata as any)?.adFormat as AdCreativePlan | undefined;
+      const useSegmentPipeline = !!adFormat && Array.isArray(adFormat.segments) && adFormat.segments.length > 0;
+
+      if (useSegmentPipeline) {
+        logger.info(`[Pipeline ${productionId}] Segment-based adFormat detected: "${adFormat!.templateName}" (${adFormat!.segments.length} segments)`);
+        await this.runSegmentBasedPipeline({
+          productionId,
+          projectId,
+          userId,
+          script,
+          adFormat: adFormat!,
+          selectedVoiceId,
+          duration,
+          tone,
+          musicQueueEvents,
+        });
+        return;
+      }
+
+      // ========== LEGACY SINGLE-PASS PIPELINE ==========
       // Stage 2: Generate TTS (Voice)
       logger.info(`[Pipeline ${productionId}] Stage 2: Generating TTS with voice ${selectedVoiceId}`);
       const ttsJob = await ttsGenerationQueue.add('generate-tts', {
@@ -478,6 +505,266 @@ export class ProductionOrchestrator {
       await musicQueueEvents.close();
       await mixingQueueEvents.close();
     }
+  }
+
+  // =========================================================================
+  // Segment-Based Pipeline (Layers 2–4)
+  //
+  // When adFormat is present, uses per-segment TTS, SFX generation, and
+  // timeline composition instead of the legacy single-pass flow.
+  // =========================================================================
+
+  private async runSegmentBasedPipeline(opts: {
+    productionId: string;
+    projectId: string;
+    userId: string;
+    script: any;
+    adFormat: AdCreativePlan;
+    selectedVoiceId: string;
+    duration: number;
+    tone: string;
+    musicQueueEvents: QueueEvents;
+  }): Promise<void> {
+    const {
+      productionId,
+      projectId,
+      userId,
+      script,
+      adFormat,
+      selectedVoiceId,
+      duration,
+      tone,
+      musicQueueEvents,
+    } = opts;
+
+    const scriptMetadata = (script as any)?.metadata as any;
+    const uploadDir = path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads');
+
+    // Log timeline visualization
+    const viz = timelineComposerService.visualizeTimeline(adFormat.segments, adFormat.totalDuration);
+    logger.info(`[Pipeline ${productionId}] Ad timeline:\n${viz}`);
+
+    // ── Stage 2a: Per-segment TTS ──────────────────────────────────────
+    logger.info(`[Pipeline ${productionId}] Stage 2a: Generating per-segment TTS`);
+    await this.updateProductionStatus(productionId, 'GENERATING_VOICE', 35, 'Generating segment voiceovers...');
+
+    const ttsResult = await segmentTTSService.generateForSegments({
+      segments: adFormat.segments,
+      voiceId: selectedVoiceId,
+    });
+
+    logger.info(`[Pipeline ${productionId}] Per-segment TTS complete: ${ttsResult.segmentResults.length} segments, ${ttsResult.totalVoiceDuration.toFixed(1)}s total voice`);
+
+    // Save TTS metadata to script for backward compat
+    const absoluteTimeline = segmentTTSService.computeAbsoluteTimeline(adFormat.segments, ttsResult.segmentResults);
+    const allSentenceTimings = absoluteTimeline.flatMap((seg) => seg.sentenceTimings);
+    script.metadata = {
+      ...(script.metadata as object),
+      lastTTS: {
+        voiceId: selectedVoiceId,
+        generatedAt: new Date().toISOString(),
+        sentenceTimings: allSentenceTimings,
+        segmentBased: true,
+        segmentCount: ttsResult.segmentResults.length,
+        totalVoiceDuration: ttsResult.totalVoiceDuration,
+      },
+    };
+    await script.save();
+
+    await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 50, 'Speech generated! Creating music and sound effects...');
+
+    // ── Stage 2b: SFX Generation (parallel with music) ────────────────
+    const sfxInputs = sfxService.extractSfxFromAdFormat(adFormat.segments);
+    let sfxResultMap = new Map<number, any>();
+
+    // Start SFX generation in parallel with music
+    const sfxPromise = sfxInputs.length > 0
+      ? sfxService.generateBatch({ items: sfxInputs, productionId }).then((batch) => {
+          // Map results back to segment indices
+          const resultMap = new Map<number, any>();
+          for (let i = 0; i < sfxInputs.length; i++) {
+            if (batch.results[i]?.filePath) {
+              resultMap.set(sfxInputs[i].segmentIndex!, batch.results[i]);
+            }
+          }
+          logger.info(`[Pipeline ${productionId}] SFX generation complete: ${batch.succeeded}/${batch.results.length} succeeded`);
+          return resultMap;
+        })
+      : Promise.resolve(new Map<number, any>());
+
+    // ── Stage 3: Music Generation (same as legacy) ────────────────────
+    logger.info(`[Pipeline ${productionId}] Stage 3: Generating music`);
+
+    // Use adFormat's overallMusicDirection as the primary music prompt
+    let musicPrompt = adFormat.overallMusicDirection || `${tone} background music for advertisement`;
+    let musicGenre = scriptMetadata?.music?.genre || 'corporate';
+    let musicMood = scriptMetadata?.music?.mood || tone;
+    let targetBPM = scriptMetadata?.music?.targetBPM as number | undefined;
+
+    // Override with LLM music metadata if available
+    if (scriptMetadata?.music?.prompt) {
+      // Prefer the LLM's detailed prompt but append cultural context
+      musicPrompt = scriptMetadata.music.prompt;
+      if (adFormat.culturalContext) {
+        musicPrompt += `. Cultural style: ${adFormat.culturalContext}`;
+      }
+      if (scriptMetadata.music.genre) musicGenre = scriptMetadata.music.genre;
+      if (scriptMetadata.music.mood) musicMood = scriptMetadata.music.mood;
+      if (typeof scriptMetadata.music.targetBPM === 'number') targetBPM = scriptMetadata.music.targetBPM;
+    }
+
+    // Generate musical blueprint if we have sentence timings
+    let blueprint: MusicalBlueprint | undefined;
+    let sunoPayload: { customMode?: boolean; title?: string; style?: string; prompt: string } | undefined;
+
+    if (allSentenceTimings.length > 0) {
+      blueprint = generateMusicalBlueprint({
+        script: script.content,
+        sentenceTimings: allSentenceTimings,
+        sentenceCues: scriptMetadata?.sentenceCues,
+        targetBPM: targetBPM ?? 100,
+        genre: musicGenre,
+        mood: musicMood,
+        totalVoiceDuration: ttsResult.totalVoiceDuration,
+        composerDirection: scriptMetadata?.music?.composerDirection,
+        instrumentation: scriptMetadata?.music?.instrumentation,
+        arc: scriptMetadata?.music?.arc,
+        buttonEnding: scriptMetadata?.music?.buttonEnding,
+        musicalStructure: scriptMetadata?.music?.musicalStructure,
+      });
+      targetBPM = blueprint.finalBPM;
+      const sunoResult = buildSunoPromptFromBlueprint(blueprint, musicGenre, duration);
+      sunoPayload = {
+        customMode: sunoResult.customMode,
+        title: sunoResult.title || undefined,
+        style: sunoResult.style || undefined,
+        prompt: sunoResult.prompt,
+      };
+      logger.info(`[Pipeline ${productionId}] Blueprint: ${blueprint.totalBars} bars @ ${blueprint.finalBPM} BPM`);
+    } else {
+      // Fallback: use the ad format's total duration for music
+      logger.info(`[Pipeline ${productionId}] No sentence timings — using direct music prompt`);
+    }
+
+    const musicRequestDuration = blueprint ? Math.ceil(blueprint.totalDuration) : Math.ceil(adFormat.totalDuration);
+    const musicJob = await musicGenerationQueue.add('generate-music', {
+      userId,
+      text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
+      duration_seconds: musicRequestDuration,
+      prompt_influence: 0.3,
+      genre: musicGenre,
+      mood: musicMood,
+      targetBPM,
+      sunoCustomMode: sunoPayload?.customMode,
+      sunoTitle: sunoPayload?.title,
+      sunoStyle: sunoPayload?.style,
+      sunoPrompt: sunoPayload?.prompt,
+      segmentBasedGeneration: false,
+    });
+    let musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
+    if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
+
+    // Quality gate (same as legacy)
+    try {
+      const musicTrack = await MusicTrack.findById(musicResult.musicId);
+      if (musicTrack?.duration && musicRequestDuration > 0) {
+        const durationRatio = musicTrack.duration / musicRequestDuration;
+        if (durationRatio < 0.7) {
+          logger.warn(`[Pipeline ${productionId}] Music too short (${musicTrack.duration}s vs ${musicRequestDuration}s). Regenerating...`);
+          await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 60, 'Regenerating music for better match...');
+          const retryJob = await musicGenerationQueue.add('generate-music', {
+            userId,
+            text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
+            duration_seconds: musicRequestDuration,
+            prompt_influence: 0.3,
+            genre: musicGenre,
+            mood: musicMood,
+            targetBPM,
+            sunoCustomMode: sunoPayload?.customMode,
+            sunoTitle: sunoPayload?.title,
+            sunoStyle: sunoPayload?.style,
+            sunoPrompt: sunoPayload?.prompt,
+            segmentBasedGeneration: false,
+          });
+          const retryResult = await retryJob.waitUntilFinished(musicQueueEvents);
+          if (retryResult?.musicId) musicResult = retryResult;
+        }
+      }
+    } catch (gateErr: any) {
+      logger.warn(`[Pipeline ${productionId}] Quality gate check failed: ${gateErr.message}`);
+    }
+
+    await Production.findByIdAndUpdate(productionId, {
+      musicId: new mongoose.Types.ObjectId(musicResult.musicId),
+    });
+
+    logger.info(`[Pipeline ${productionId}] Music generated: ${musicResult.musicId}`);
+
+    // Wait for SFX to finish
+    sfxResultMap = await sfxPromise;
+
+    await this.updateProductionStatus(productionId, 'MIXING', 75, 'Composing final audio from all segments...');
+
+    // ── Stage 4: Timeline Composition ─────────────────────────────────
+    logger.info(`[Pipeline ${productionId}] Stage 4: Timeline composition`);
+
+    // Resolve music file path
+    const musicTrack = await MusicTrack.findById(musicResult.musicId);
+    if (!musicTrack?.fileUrl) throw new Error('Music track file URL not found');
+    const musicFilePath = path.join(uploadDir, musicTrack.fileUrl.replace('/uploads/', ''));
+
+    // Ensure productions directory exists
+    const productionsDir = path.join(uploadDir, 'productions');
+    if (!fs.existsSync(productionsDir)) {
+      fs.mkdirSync(productionsDir, { recursive: true });
+    }
+    const outputFilename = `production_${productionId}_${uuidv4()}.mp3`;
+    const outputPath = path.join(productionsDir, outputFilename);
+
+    // Resolve mix settings from LLM metadata
+    const baseMusicVolume = scriptMetadata?.volume?.musicVolume ?? 0.15;
+    const fadeIn = scriptMetadata?.fades?.fadeInSeconds ?? 0.08;
+    const fadeOut = scriptMetadata?.fades?.fadeOutSeconds ?? 0.4;
+    const fadeCurve = scriptMetadata?.fades?.curve ?? 'exp';
+
+    const composerResult = await timelineComposerService.compose({
+      segments: adFormat.segments,
+      voiceResults: ttsResult.segmentResults,
+      musicFilePath,
+      sfxResults: sfxResultMap,
+      outputPath,
+      baseMusicVolume,
+      fadeIn,
+      fadeOut,
+      fadeCurve,
+      normalizeLoudness: true,
+      loudnessTargetLUFS: -16,
+      loudnessTruePeak: -2,
+    });
+
+    const productionUrl = `/uploads/productions/${outputFilename}`;
+
+    // Update production as completed
+    await Production.findByIdAndUpdate(productionId, {
+      status: 'COMPLETED',
+      progress: 100,
+      outputUrl: productionUrl,
+      duration: Math.round(composerResult.duration),
+      settings: {
+        prompt: scriptMetadata?.prompt,
+        voiceId: selectedVoiceId,
+        duration,
+        tone,
+        automated: true,
+        segmentBased: true,
+        templateId: adFormat.templateId,
+        templateName: adFormat.templateName,
+        segmentCount: adFormat.segments.length,
+        sfxCount: sfxResultMap.size,
+      } as any,
+    });
+
+    logger.info(`[Pipeline ${productionId}] Segment-based production completed! ${composerResult.duration.toFixed(1)}s, ${adFormat.segments.length} segments, ${sfxResultMap.size} SFX`);
   }
 
   /**

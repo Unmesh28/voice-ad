@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { AdCreativePlanSchema, getAdFormatJsonSchema } from './ad-format';
+import type { AdCreativePlan } from './ad-format';
 
 // ---------------------------------------------------------------------------
 // Ad Categories (for context.adCategory)
@@ -199,6 +201,9 @@ export const AdProductionLLMResponseSchema = z.object({
   sentenceCues: z.array(SentenceCueSchema).nullish(),
   /** Optional: sound design cues (max 5) for key moments (brand reveal, transitions, accents). */
   soundDesign: z.array(SoundDesignCueSchema).max(5).nullish(),
+  /** Optional: segment-based creative plan (ad format template). When present, defines the creative
+   *  structure of the ad as ordered segments with per-segment audio layers (voice, music, SFX). */
+  adFormat: AdCreativePlanSchema.nullish(),
 });
 
 // ---------------------------------------------------------------------------
@@ -223,6 +228,9 @@ export interface AdProductionLLMResponse {
   mixPreset?: MixPreset;
   sentenceCues?: AdProductionSentenceCue[];
   soundDesign?: AdProductionSoundDesignCue[];
+  /** Segment-based creative plan. When present, defines the ad as ordered segments
+   *  with per-segment audio layers (voice, music, SFX) instead of flat voice-over-music. */
+  adFormat?: AdCreativePlan | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +327,70 @@ export const AD_PRODUCTION_EXAMPLE_JSON: AdProductionLLMResponse = {
     { timestamp: 7.5, sound: 'subtle whoosh', purpose: 'Transition to product intro' },
     { timestamp: 18.0, sound: 'soft impact', purpose: 'Emphasize key benefit' },
   ],
+  adFormat: {
+    templateId: 'classic_radio',
+    templateName: 'Classic Radio',
+    totalDuration: 30,
+    segments: [
+      {
+        segmentIndex: 0,
+        type: 'music_solo',
+        label: 'Synth intro',
+        duration: 3,
+        voiceover: null,
+        music: {
+          description: 'Clean corporate synth, upbeat, 100 BPM',
+          behavior: 'full',
+          volume: 1.0,
+          culturalStyle: null,
+          instruments: null,
+        },
+        sfx: null,
+        transition: 'duck_transition',
+        transitionDuration: 0.5,
+      },
+      {
+        segmentIndex: 1,
+        type: 'voiceover_with_music',
+        label: 'Main voiceover',
+        duration: 24,
+        voiceover: {
+          text: '[excited] Welcome to TechFlow! [warmly] We make your work easier… [pause] Try free today.',
+          voiceStyle: 'professional',
+        },
+        music: {
+          description: 'Corporate synth bed, ducked under voice, 100 BPM',
+          behavior: 'ducked',
+          volume: 0.15,
+          culturalStyle: null,
+          instruments: null,
+        },
+        sfx: null,
+        transition: 'duck_transition',
+        transitionDuration: 0.3,
+      },
+      {
+        segmentIndex: 2,
+        type: 'music_solo',
+        label: 'Button ending',
+        duration: 3,
+        voiceover: null,
+        music: {
+          description: 'Warm major chord, clean cutoff, button ending',
+          behavior: 'full',
+          volume: 1.0,
+          culturalStyle: null,
+          instruments: null,
+        },
+        sfx: null,
+        transition: 'natural',
+        transitionDuration: null,
+      },
+    ],
+    overallMusicDirection:
+      'Clean upbeat corporate synth, 100 BPM, instrumental, no vocals, leaves 1-4kHz clear for voice. Button ending.',
+    culturalContext: null,
+  },
 };
 
 /** Same as AD_PRODUCTION_EXAMPLE_JSON serialized for use in prompts (single line, no extra whitespace). */
@@ -336,7 +408,7 @@ export function getOpenAIAdProductionJsonSchema(): {
   strict: boolean;
   schema: Record<string, unknown>;
 } {
-  return {
+  const output = {
     name: 'ad_production_response',
     strict: true,
     schema: {
@@ -532,6 +604,11 @@ export function getOpenAIAdProductionJsonSchema(): {
       additionalProperties: false,
     },
   };
+
+  // Inject adFormat schema into the properties
+  (output.schema as Record<string, any>).properties.adFormat = getAdFormatJsonSchema();
+
+  return output;
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +737,7 @@ export function applySafeDefaultsAndClamp(
     volume,
     mixPreset: parsed.mixPreset ?? undefined,
     sentenceCues: parsed.sentenceCues ?? undefined,
+    adFormat: parsed.adFormat ?? undefined,
   };
 }
 
@@ -709,6 +787,12 @@ export function createFallbackAdProductionResponse(
 
   const script = lines.join(' ');
 
+  const bpm = pace === 'slow' ? 85 : pace === 'fast' ? 115 : 100;
+  const musicPromptFallback = `Professional ${tone} background music, instrumental, ${pace} pace, suitable for voice-over, ${bpm} BPM`;
+  const introSeconds = 3;
+  const outroSeconds = 2;
+  const voiceSeconds = duration - introSeconds - outroSeconds;
+
   return applySafeDefaultsAndClamp({
     version: '1.0',
     script,
@@ -722,8 +806,8 @@ export function createFallbackAdProductionResponse(
       voiceHints: null,
     },
     music: {
-      prompt: `Professional ${tone} background music, instrumental, ${pace} pace, suitable for voice-over, 100 BPM`,
-      targetBPM: pace === 'slow' ? 85 : pace === 'fast' ? 115 : 100,
+      prompt: musicPromptFallback,
+      targetBPM: bpm,
       genre: 'corporate',
       mood: tone,
       arc: undefined,
@@ -732,6 +816,56 @@ export function createFallbackAdProductionResponse(
     volume: { voiceVolume: 1.0, musicVolume: 0.15, segments: undefined },
     mixPreset: 'voiceProminent',
     sentenceCues: undefined,
+    adFormat: {
+      templateId: 'classic_radio',
+      templateName: 'Classic Radio',
+      totalDuration: duration,
+      segments: [
+        {
+          segmentIndex: 0,
+          type: 'music_solo',
+          label: 'Music intro',
+          duration: introSeconds,
+          voiceover: null,
+          music: {
+            description: musicPromptFallback,
+            behavior: 'full',
+            volume: 1.0,
+          },
+          sfx: null,
+          transition: 'duck_transition',
+        },
+        {
+          segmentIndex: 1,
+          type: 'voiceover_with_music',
+          label: 'Main voiceover',
+          duration: voiceSeconds,
+          voiceover: { text: script },
+          music: {
+            description: musicPromptFallback,
+            behavior: 'ducked',
+            volume: 0.15,
+          },
+          sfx: null,
+          transition: 'duck_transition',
+        },
+        {
+          segmentIndex: 2,
+          type: 'music_solo',
+          label: 'Music outro',
+          duration: outroSeconds,
+          voiceover: null,
+          music: {
+            description: musicPromptFallback,
+            behavior: 'full',
+            volume: 1.0,
+          },
+          sfx: null,
+          transition: 'natural',
+        },
+      ],
+      overallMusicDirection: musicPromptFallback,
+    },
   });
 }
 
