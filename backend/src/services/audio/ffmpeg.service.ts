@@ -998,6 +998,54 @@ class FFmpegService {
   }
 
   /**
+   * Apply voice-supportive EQ to a music track.
+   * Carves frequency space for voice intelligibility:
+   *   - High-pass at 30Hz (remove sub-bass rumble)
+   *   - Notch at 3kHz (-4dB, Q=1.0) — carve the voice presence band
+   *   - Shelf lift at 8kHz (+2dB) — add air/brightness above voice range
+   */
+  async applyVoiceSupportEQ(
+    inputPath: string,
+    outputPath: string
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info('Applying voice-support EQ to music track');
+        const command = ffmpeg(inputPath);
+
+        const eqFilter = [
+          'highpass=f=30:poles=2',
+          'equalizer=f=3000:t=q:w=1.0:g=-4',
+          'equalizer=f=8000:t=h:g=2',
+        ].join(',');
+
+        command
+          .audioFilters(eqFilter)
+          .audioCodec('libmp3lame')
+          .audioBitrate('192k')
+          .audioChannels(2)
+          .audioFrequency(44100)
+          .output(outputPath);
+
+        command
+          .on('end', () => {
+            logger.info('Voice-support EQ applied:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('FFmpeg voice-support EQ error:', msg);
+            reject(new Error(`Failed to apply voice-support EQ: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
    * Clean up temporary files
    */
   async cleanupFile(filePath: string): Promise<void> {

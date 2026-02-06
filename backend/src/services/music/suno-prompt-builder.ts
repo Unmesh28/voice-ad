@@ -39,6 +39,51 @@ export interface AdContextForMusic {
   pace: string;
 }
 
+// ---------------------------------------------------------------------------
+// Harmonic defaults — genre-appropriate keys and chord progressions
+// ---------------------------------------------------------------------------
+
+/** Infer a default key when the LLM doesn't provide one. */
+export function inferKeyForGenre(genre: string, mood: string): string {
+  const g = genre.toLowerCase();
+  const m = mood.toLowerCase();
+
+  // Minor keys for darker/emotional moods
+  if (/sad|melanchol|dark|dramatic|tense|suspense/i.test(m)) {
+    if (/cinematic|epic|film/i.test(g)) return 'D minor';
+    return 'A minor';
+  }
+
+  // Genre-specific defaults
+  if (/jazz|soul|r&b/i.test(g)) return 'Bb major';
+  if (/rock|punk|metal/i.test(g)) return 'E major';
+  if (/edm|electronic|dance|techno/i.test(g)) return 'F minor';
+  if (/folk|acoustic|country/i.test(g)) return 'G major';
+  if (/hip.?hop|trap|rap/i.test(g)) return 'C minor';
+  if (/latin|reggaeton|salsa/i.test(g)) return 'A minor';
+  if (/indian|punjabi|bollywood|bhangra/i.test(g)) return 'D major';
+  if (/cinematic|orchestral|epic/i.test(g)) return 'D major';
+
+  // Bright/upbeat = major, else major default
+  return 'C major';
+}
+
+/** Infer a chord progression hint based on genre. */
+export function inferChordProgression(genre: string, mood: string): string {
+  const g = genre.toLowerCase();
+  const m = mood.toLowerCase();
+
+  if (/sad|melanchol|emotional/i.test(m)) return 'i-III-VII-VI progression';
+  if (/jazz|soul/i.test(g)) return 'ii-V-I progression';
+  if (/rock|punk/i.test(g)) return 'I-IV-V power progression';
+  if (/edm|dance|electronic/i.test(g)) return 'i-VI-III-VII progression';
+  if (/pop|corporate|upbeat|bright/i.test(`${g} ${m}`)) return 'I-V-vi-IV progression';
+  if (/cinematic|epic/i.test(g)) return 'I-IV-vi-V progression';
+  if (/hip.?hop|trap/i.test(g)) return 'i-iv-VI-V progression';
+
+  return 'I-IV-V-I progression'; // Classic resolution, universally safe
+}
+
 /** TTS-derived timing per sentence (from alignment-to-sentences). */
 export interface SentenceTiming {
   text: string;
@@ -60,9 +105,45 @@ export interface ScriptAnalysisForMusic {
 }
 
 /**
+ * Build prompt text with priority-based truncation.
+ * Sections are ordered by priority (index 0 = highest priority).
+ * When the total exceeds maxLen, drop sections from the END first
+ * (lowest priority). The closing instruction (last section) is always
+ * kept if possible since it contains critical "instrumental, no vocals".
+ */
+function buildWithPriorityTruncation(sections: string[], maxLen: number): string {
+  const full = sections.join(' ').replace(/\s+/g, ' ').trim();
+  if (full.length <= maxLen) return full;
+
+  // Always keep the first 3 sections (genre/BPM/key, instrumentation, direction)
+  // and the last section (closing instructions). Drop from middle-end.
+  const mustKeepHead = sections.slice(0, 3);
+  const mustKeepTail = sections.slice(-1);
+  const droppable = sections.slice(3, -1); // ordered low→high priority for dropping
+
+  let result = [...mustKeepHead, ...mustKeepTail].join(' ').replace(/\s+/g, ' ').trim();
+
+  // Add droppable sections in order (highest priority first = lowest index)
+  for (const section of droppable) {
+    const candidate = [...mustKeepHead, section, ...mustKeepTail].join(' ').replace(/\s+/g, ' ').trim();
+    if (candidate.length <= maxLen) {
+      // Insert before the tail
+      mustKeepHead.push(section);
+      result = candidate;
+    } else {
+      // This section doesn't fit — stop adding more (they'd be even lower priority)
+      break;
+    }
+  }
+
+  return result.slice(0, maxLen);
+}
+
+/**
  * Build one composition prompt for all TTM providers (Suno and ElevenLabs).
- * Order: genre/BPM/mood first (never dropped when truncating for ElevenLabs), then composer direction, context, music prompt, arc, fades, volume, mixPreset, sentenceCues, closing.
- * Total capped at SUNO_STYLE_MAX (trim from end if over).
+ * Sections are ordered by priority: genre/BPM/key (P1) → instrumentation (P2) →
+ * direction (P3) → context/prompt/arc (P4) → fades/volume/cues (P5) → closing (P6).
+ * When over SUNO_STYLE_MAX, lowest-priority sections are dropped first.
  */
 export function buildSunoPromptFromScriptAnalysis(
   input: ScriptAnalysisForMusic
@@ -84,8 +165,10 @@ export function buildSunoPromptFromScriptAnalysis(
 
   const sections: string[] = [];
 
-  // 1) Genre, BPM, mood first (critical for ElevenLabs truncation)
-  sections.push(`genre: ${genre}. targetBPM: ${baseBPM}. mood: ${mood}.`);
+  // 1) Genre, BPM, mood, key, chords first (critical — never truncated)
+  const key = (music as any).musicalStructure?.keySignature || inferKeyForGenre(genre, mood);
+  const chords = inferChordProgression(genre, mood);
+  sections.push(`genre: ${genre}. targetBPM: ${baseBPM}. mood: ${mood}. Key: ${key}. ${chords}. Maintain consistent melodic motif throughout.`);
 
   // 2) Instrumentation (drums, bass, mids, effects) - leave 1-4kHz clear for voice
   if (music.instrumentation) {
@@ -202,7 +285,11 @@ export function buildSunoPromptFromScriptAnalysis(
   // Critical instructions for continuity and flow
   sections.push('IMPORTANT: Continuous flowing music, no abrupt breaks or stops. Music must adapt to speech pacing and natural pauses. Smooth tempo transitions between sections. Instrumental only, no vocals. Professional ad background that supports voice without competing.');
 
-  const fullStyle = sections.join(' ').replace(/\s+/g, ' ').trim().slice(0, SUNO_STYLE_MAX);
+  // Priority-based truncation: sections are ordered by priority (index 0 = highest).
+  // When total exceeds SUNO_STYLE_MAX, drop from the end (lowest priority first).
+  // This ensures genre/BPM/key/instrumentation/direction are never lost, while
+  // sentence cues and volume metadata are dropped first.
+  const fullStyle = buildWithPriorityTruncation(sections, SUNO_STYLE_MAX);
   const title = `Ad ${durationSeconds}s ${genre}`.slice(0, SUNO_TITLE_MAX);
 
   const hasMusicAnalysis =

@@ -652,6 +652,11 @@ export class ProductionOrchestrator {
     }
 
     const musicRequestDuration = blueprint ? Math.ceil(blueprint.totalDuration) : Math.ceil(adFormat.totalDuration);
+
+    // Enable segment-based generation when the LLM provided a multi-segment arc
+    const musicArc = scriptMetadata?.music?.arc as { startSeconds: number; endSeconds: number; label: string; musicPrompt: string; targetBPM?: number; energyLevel?: number }[] | undefined;
+    const useSegmentGeneration = Array.isArray(musicArc) && musicArc.length >= 2;
+
     const musicJob = await musicGenerationQueue.add('generate-music', {
       userId,
       text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
@@ -664,8 +669,16 @@ export class ProductionOrchestrator {
       sunoTitle: sunoPayload?.title,
       sunoStyle: sunoPayload?.style,
       sunoPrompt: sunoPayload?.prompt,
-      segmentBasedGeneration: false,
+      segmentBasedGeneration: useSegmentGeneration,
+      arc: useSegmentGeneration ? musicArc : undefined,
+      enableSmartOverlap: true,
+      musicMetadata: useSegmentGeneration ? {
+        instrumentation: scriptMetadata?.music?.instrumentation,
+        composerDirection: scriptMetadata?.music?.composerDirection,
+        buttonEnding: scriptMetadata?.music?.buttonEnding,
+      } : undefined,
     });
+    logger.info(`[Pipeline ${productionId}] Music generation: ${useSegmentGeneration ? `segment-based (${musicArc!.length} segments)` : 'single-track'}`);
     let musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
     if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
 
@@ -677,6 +690,7 @@ export class ProductionOrchestrator {
         if (durationRatio < 0.7) {
           logger.warn(`[Pipeline ${productionId}] Music too short (${musicTrack.duration}s vs ${musicRequestDuration}s). Regenerating...`);
           await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 60, 'Regenerating music for better match...');
+          // Retry with single-track (more reliable for duration matching)
           const retryJob = await musicGenerationQueue.add('generate-music', {
             userId,
             text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
@@ -716,7 +730,19 @@ export class ProductionOrchestrator {
     // Resolve music file path
     const musicTrack = await MusicTrack.findById(musicResult.musicId);
     if (!musicTrack?.fileUrl) throw new Error('Music track file URL not found');
-    const musicFilePath = path.join(uploadDir, musicTrack.fileUrl.replace('/uploads/', ''));
+    const rawMusicPath = path.join(uploadDir, musicTrack.fileUrl.replace('/uploads/', ''));
+
+    // Apply voice-support EQ to the music track (carves 3kHz for voice clarity)
+    const eqMusicPath = rawMusicPath.replace(/\.mp3$/, '_eq.mp3');
+    let musicFilePath: string;
+    try {
+      await ffmpegService.applyVoiceSupportEQ(rawMusicPath, eqMusicPath);
+      musicFilePath = eqMusicPath;
+      logger.info(`[Pipeline ${productionId}] Voice-support EQ applied to music`);
+    } catch (eqErr: any) {
+      logger.warn(`[Pipeline ${productionId}] EQ failed, using raw music: ${eqErr.message}`);
+      musicFilePath = rawMusicPath;
+    }
 
     // Ensure productions directory exists
     const productionsDir = path.join(uploadDir, 'productions');

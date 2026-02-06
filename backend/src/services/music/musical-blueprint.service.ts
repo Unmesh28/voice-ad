@@ -21,6 +21,7 @@ import {
   type TimeSignature,
 } from '../../utils/musical-timing';
 import { logger } from '../../config/logger';
+import { inferKeyForGenre, inferChordProgression } from './suno-prompt-builder';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -542,13 +543,14 @@ function buildBarBasedPrompt(input: BarPromptInput): string {
 
   const parts: string[] = [];
 
-  // Header: BPM, time signature, key, total structure
-  const keyPart = musicalStructure?.keySignature ? `, ${musicalStructure.keySignature}` : '';
+  // Header: BPM, time signature, key, chords, total structure
+  const key = musicalStructure?.keySignature || inferKeyForGenre(genre, mood);
+  const chords = inferChordProgression(genre, mood);
   const bodyFeelPart = musicalStructure?.bodyFeel ? `, ${musicalStructure.bodyFeel} feel` : '';
-  parts.push(`${finalBPM} BPM, ${ts} time${keyPart}, ${mood}${bodyFeelPart}, ${totalBars} bars total (~${Math.round(totalDuration)}s).`);
+  parts.push(`${finalBPM} BPM, ${ts} time, ${key}, ${mood}${bodyFeelPart}, ${totalBars} bars total (~${Math.round(totalDuration)}s).`);
 
-  // Genre/style
-  parts.push(`Genre: ${genre}. Instrumental only, no vocals.`);
+  // Genre/style + harmonic constraints
+  parts.push(`Genre: ${genre}. ${chords}. Consistent melodic motif throughout. Instrumental only, no vocals.`);
 
   // Instrumentation summary
   if (instrumentation) {
