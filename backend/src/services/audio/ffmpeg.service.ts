@@ -155,14 +155,25 @@ class FFmpegService {
           ? Math.max(0.05, baseMusicVol * (1 - duckingAmount * 0.6))
           : baseMusicVol;
 
+        // Voice delay: when blueprint alignment says voice should enter on a
+        // downbeat, we pad silence before the voice so it starts at the right
+        // musical moment. The delay is in seconds on the voice stream.
+        const voiceDelaySec = voiceInput.delay ?? 0;
+
         // Single, compatible filter chain: normalize both to same format and sample rate for proper sync, then mix.
         // Same sample rate (44100) and stereo ensures music and speech stay sample-aligned with no drift.
         const END_PADDING = 0.08;
-        const mixDuration = voiceDuration + END_PADDING;
+        const mixDuration = voiceDuration + voiceDelaySec + END_PADDING;
         const SAMPLE_RATE = 44100;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
+
+        // If voice has a delay, pad it with silence so it enters on the right beat
+        const voiceFilter = voiceDelaySec > 0
+          ? `[0:a]${normalizeSync},volume=${voiceVol},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}[v]`
+          : `[0:a]${normalizeSync},volume=${voiceVol}[v]`;
+
         const filters: string[] = [
-          `[0:a]${normalizeSync},volume=${voiceVol}[v]`,
+          voiceFilter,
           `[1:a]${normalizeSync},volume=${musicVolume}[m]`,
           `[v][m]amix=inputs=2:duration=longest:dropout_transition=2[mixraw]`,
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
