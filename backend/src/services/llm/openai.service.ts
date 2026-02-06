@@ -200,6 +200,14 @@ STRICT REQUIREMENTS:
 - Script: Use ONLY ElevenLabs v3 audio tags ([happy], [excited], [pause], [whispers], [warmly], [sighs], [laughs], etc.). No SSML, no stage directions, no [emphasis] or [dramatic]—only spoken words and these audio tags.
 - Context: You MUST set context.adCategory, context.pace, and context.emotion from the user prompt and brief. Infer adCategory (retail, automotive, tech, finance, food, healthcare, entertainment, real_estate, other), pace (slow, moderate, fast), and emotion from the request.
 
+MUSICAL PHRASING AWARENESS (apply when writing the script):
+- Write sentences that naturally group into 2-bar or 4-bar musical phrases at the target BPM. At 100 BPM in 4/4, one bar = 2.4s, so 4 bars = 9.6s. A sentence that takes ~5s to read = ~2 bars.
+- Place the most important words (brand name, key benefit, CTA) at positions that would naturally fall on downbeats (bar starts). Put them at the BEGINNING of sentences, not buried in the middle.
+- Create natural pauses of 0.5-1.5 seconds between major sections (these become musical breathing points).
+- Short punchy sentences (1-2 bars) for high-energy/CTA sections. Longer flowing sentences (2-4 bars) for emotional/building sections.
+- The CTA should be preceded by a brief pause (0.3-0.8s) so the music can set up a resolve.
+- Think of the script as lyrics to a song: rhythm, cadence, and pacing matter as much as the words themselves.
+
 MUSIC DIRECTOR PRINCIPLES (apply before composing):
 
 1. EMOTION DECIDES MUSIC, NOT TASTE. Before any technical decision, ask:
@@ -260,9 +268,20 @@ INSTRUMENTATION (critical for professional voice-under mixing):
 - Decide instrumentation based on genre, mood, and arc segments. Intro may have minimal drums/bass; CTA may have fuller instrumentation. Always carve mid-range for voice clarity.
 - Output music.buttonEnding (optional): { type, timing?, description? }. Professional ads use clean button endings (sustained chord cutoff, punchy stinger), NOT fade-outs. Example: { type: "sustained chord cutoff", timing: "0.5s after final word", description: "Warm major chord, clean release" }. When buttonEnding is present, the music generator will be instructed to end cleanly.
 
+MUSICAL STRUCTURE (for bar-aware blueprint):
+- You SHOULD output music.musicalStructure: { introType, introBars, bodyFeel, peakMoment, endingType, outroBars, keySignature?, phraseLength? }.
+  - introType: "ambient_build" (soft pads building), "rhythmic_hook" (beat-driven opening), "melodic_theme" (main melody intro), or "silence_to_entry" (minimal/silence then music enters with voice).
+  - introBars: 1-4 bars of music before voice enters (1-2 for short ads <20s, 2-4 for longer).
+  - bodyFeel: one-word feel for main section ("driving", "flowing", "pulsing", "steady", "bouncy", "ethereal").
+  - peakMoment: where peak energy should land ("at brand reveal", "at key benefit", "bar 12", "at problem-solution transition").
+  - endingType: "button" (clean chord cutoff), "sustain" (held chord fading naturally), "stinger" (short punchy hit), "decay" (natural instrument decay).
+  - outroBars: 1-4 bars after last word for the ending.
+  - keySignature: optional (e.g. "C major", "A minor"). Helps maintain harmonic consistency.
+  - phraseLength: bars per musical phrase (usually 4 for pop/corporate, 2 for urgent/fast ads).
+
 - Fades: You MUST set fades.fadeInSeconds (0.08–0.12) and fades.fadeOutSeconds (0.2–0.6). Note: fadeOut is for the ENTIRE ad output (voice+music), not the music track button ending.
 - Volume: You MUST set volume.voiceVolume (0.8–1.0) and volume.musicVolume (0.1–0.25). Add volume.segments for "music_up" at open and "voice_up" at CTA when it helps.
-- Sentence-by-sentence: Add "sentenceCues" (array of { index, musicCue, musicVolumeMultiplier, musicDirection? })—one object per sentence. musicCue = short label (hook, excitement, highlight, pause, warm, cta). musicVolumeMultiplier 0.7–1.3 so music ducks or swells per sentence. Optional musicDirection = one short phrase per sentence (e.g. swell, staccato, hold, hit on downbeat, quiet under) for the music generator.
+- Sentence-by-sentence: Add "sentenceCues" (array of { index, musicCue, musicVolumeMultiplier, musicDirection?, musicalFunction? })—one object per sentence. musicCue = short label (hook, excitement, highlight, pause, warm, cta). musicVolumeMultiplier 0.7–1.3 so music ducks or swells per sentence. Optional musicDirection = one short phrase per sentence (e.g. swell, staccato, hold, hit on downbeat, quiet under) for the music generator. Optional musicalFunction = the structural role of this sentence: "hook" (attention-grab), "build" (rising energy), "peak" (climax), "resolve" (settling), "transition" (bridging between sections), "pause" (musical breathing point).
 
 TOP-LEVEL KEYS: script, context, music, fades, volume, version (optional), mixPreset (optional), sentenceCues (optional).
 
@@ -270,7 +289,7 @@ TOP-LEVEL KEYS: script, context, music, fades, volume, version (optional), mixPr
 
 2. "context" (object): adCategory, tone, emotion, pace, durationSeconds, targetWordsPerMinute (optional), voiceHints (optional).
 
-3. "music" (object): As the ad music composer: prompt (overall description), targetBPM (70–130), genre, mood, composerDirection (short paragraph, max 300 chars), instrumentation (drums, bass, mids, effects), buttonEnding (optional: type, timing, description for clean endings). MUST include "arc" (2–4 segments) with startSeconds, endSeconds, label, musicPrompt, targetBPM, energyLevel (1-10)—each segment aligned to script structure and emotional arc.
+3. "music" (object): As the ad music composer: prompt (overall description), targetBPM (70–130), genre, mood, composerDirection (short paragraph, max 300 chars), instrumentation (drums, bass, mids, effects), buttonEnding (optional: type, timing, description for clean endings), musicalStructure (introType, introBars, bodyFeel, peakMoment, endingType, outroBars, keySignature, phraseLength). MUST include "arc" (2–4 segments) with startSeconds, endSeconds, label, musicPrompt, targetBPM, energyLevel (1-10)—each segment aligned to script structure and emotional arc.
 
 4. "fades" (object): fadeInSeconds (0.08–0.12), fadeOutSeconds (0.2–0.6), curve (optional).
 
@@ -278,7 +297,7 @@ TOP-LEVEL KEYS: script, context, music, fades, volume, version (optional), mixPr
 
 6. "mixPreset" (optional): "voiceProminent" | "balanced" | "musicEmotional". Prefer "voiceProminent" for ads.
 
-7. "sentenceCues" (optional): One { index, musicCue, musicVolumeMultiplier, musicDirection? } per sentence in order. musicDirection = optional short composer note (swell, staccato, hold, hit on downbeat, quiet under).
+7. "sentenceCues" (optional): One { index, musicCue, musicVolumeMultiplier, musicDirection?, musicalFunction? } per sentence in order. musicDirection = optional short composer note (swell, staccato, hold, hit on downbeat, quiet under). musicalFunction = structural role (hook, build, peak, resolve, transition, pause).
 
 EXAMPLE OUTPUT (follow this structure; adapt content to the user's brief):
 ${getAdProductionExampleJSONString()}`;
@@ -303,9 +322,9 @@ ${getAdProductionExampleJSONString()}`;
       `1. Base music on the brief's MESSAGE, tone, and emotional arc—NOT on script language (e.g. Hindi) or ad category alone. Do not use "Traditional Indian instruments" just because the script is in Hindi; do not default to "electronic" just because category is tech. Choose genre and mood from what the ad is actually saying and selling.`,
       `2. Mentally break down the script into segments (intro/hook, features or benefits, product intro or key message, call-to-action) and assign precise timing (startSeconds, endSeconds) so they sum to ${duration}s.`,
       `3. For each segment, decide: label, musicPrompt (feel + BPM in words), and targetBPM. Follow best practices: intro = subtle build/lower BPM; middle = main energy/BPM; CTA = punchy resolve.`,
-      `4. Output music.prompt, music.targetBPM, music.genre, music.mood, music.composerDirection (max 300 chars), music.instrumentation (drums, bass, mids, effects—ensure mids leave 1-4kHz clear for voice), optional music.buttonEnding (for clean endings, not fade-outs), and music.arc with 2–4 segments covering 0–${duration}s.`,
+      `4. Output music.prompt, music.targetBPM, music.genre, music.mood, music.composerDirection (max 300 chars), music.instrumentation (drums, bass, mids, effects—ensure mids leave 1-4kHz clear for voice), optional music.buttonEnding (for clean endings, not fade-outs), music.musicalStructure (introType, introBars, bodyFeel, peakMoment, endingType, outroBars, keySignature, phraseLength), and music.arc with 2–4 segments covering 0–${duration}s.`,
       `5. Think like a professional Music Director: Apply the emotion-first principle. Before composing, identify the emotional journey (e.g. Frustration → Curiosity → Relief → Action). Map key sync points: brand name mention (subtle lift), key benefit (peak energy), CTA (resolve). Assign energy level (1-10) to each arc segment that serves the emotion at that moment (e.g. intro=3, peak=7, resolve=5). Ensure instrumentation density matches energy (low=sparse, high=full).`,
-      `6. Add sentenceCues: one per sentence (index 0, 1, 2...), with musicCue (e.g. hook, excitement, highlight, cta), musicVolumeMultiplier (0.7–1.3), and optional musicDirection (e.g. swell, staccato, hold, hit on downbeat).`,
+      `6. Add sentenceCues: one per sentence (index 0, 1, 2...), with musicCue (e.g. hook, excitement, highlight, cta), musicVolumeMultiplier (0.7–1.3), optional musicDirection (e.g. swell, staccato, hold, hit on downbeat), and musicalFunction (hook, build, peak, resolve, transition, pause).`,
     ];
     if (input.tone) {
       parts.push(`- Tone: ${input.tone}`);

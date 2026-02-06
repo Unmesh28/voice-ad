@@ -245,6 +245,7 @@ export class ProductionOrchestrator {
           instrumentation: scriptMetadata?.music?.instrumentation,
           arc: scriptMetadata?.music?.arc,
           buttonEnding: scriptMetadata?.music?.buttonEnding,
+          musicalStructure: scriptMetadata?.music?.musicalStructure,
         });
 
         // Use blueprint's fine-tuned BPM
@@ -340,9 +341,51 @@ export class ProductionOrchestrator {
         sunoPrompt: sunoPayload?.prompt,
         segmentBasedGeneration: false,
       });
-      const musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
+      let musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
       if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
       logger.info(`[Pipeline ${productionId}] Music generated: ${musicResult.musicId}`);
+
+      // ========== MUSIC QUALITY GATE (Tier 4) ==========
+      // Quick check: is the generated track's duration within acceptable range?
+      // If it's way too short (>30% below requested), regenerate once.
+      const requestedDuration = musicRequestDuration;
+      try {
+        const musicTrack = await MusicTrack.findById(musicResult.musicId);
+        if (musicTrack?.duration && requestedDuration > 0) {
+          const actualDuration = musicTrack.duration;
+          const durationRatio = actualDuration / requestedDuration;
+          logger.info(`[Pipeline ${productionId}] Quality gate: requested=${requestedDuration}s, actual=${actualDuration}s, ratio=${durationRatio.toFixed(2)}`);
+
+          if (durationRatio < 0.7) {
+            logger.warn(`[Pipeline ${productionId}] Music too short (${actualDuration}s vs ${requestedDuration}s). Regenerating once...`);
+            await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 55, 'Regenerating music for better match...');
+
+            const retryJob = await musicGenerationQueue.add('generate-music', {
+              userId,
+              text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
+              duration_seconds: requestedDuration,
+              prompt_influence: 0.3,
+              genre: musicGenre,
+              mood: musicMood,
+              targetBPM,
+              sunoCustomMode: sunoPayload?.customMode,
+              sunoTitle: sunoPayload?.title,
+              sunoStyle: sunoPayload?.style,
+              sunoPrompt: sunoPayload?.prompt,
+              segmentBasedGeneration: false,
+            });
+            const retryResult = await retryJob.waitUntilFinished(musicQueueEvents);
+            if (retryResult?.musicId) {
+              musicResult = retryResult;
+              logger.info(`[Pipeline ${productionId}] Retry music generated: ${retryResult.musicId}`);
+            }
+          }
+        }
+      } catch (gateErr: any) {
+        // Non-fatal: quality gate failure should not block the pipeline
+        logger.warn(`[Pipeline ${productionId}] Quality gate check failed: ${gateErr.message}`);
+      }
+
       await Production.findByIdAndUpdate(productionId, {
         musicId: new mongoose.Types.ObjectId(musicResult.musicId),
       });

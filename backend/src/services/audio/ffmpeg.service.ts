@@ -969,6 +969,35 @@ class FFmpegService {
   }
 
   /**
+   * Measure the integrated loudness (LUFS) of an audio file using FFmpeg ebur128.
+   * Returns the integrated loudness value in LUFS (e.g. -16.0).
+   */
+  async measureLoudness(filePath: string): Promise<number> {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+
+    try {
+      const { stderr } = await execAsync(
+        `ffmpeg -i "${filePath}" -af "ebur128=peak=true" -f null - 2>&1`,
+        { maxBuffer: 5 * 1024 * 1024, timeout: 30000 }
+      );
+
+      // ebur128 outputs "Summary:" section at the end with "I: -16.0 LUFS"
+      const integratedMatch = /I:\s*(-?[\d.]+)\s*LUFS/i.exec(stderr);
+      if (integratedMatch) {
+        return parseFloat(integratedMatch[1]);
+      }
+
+      logger.warn('Could not parse integrated loudness from ebur128 output');
+      return -16; // Default fallback
+    } catch (error: any) {
+      logger.warn(`Loudness measurement failed: ${error.message}`);
+      return -16; // Default fallback
+    }
+  }
+
+  /**
    * Clean up temporary files
    */
   async cleanupFile(filePath: string): Promise<void> {

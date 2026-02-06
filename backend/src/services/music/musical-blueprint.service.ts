@@ -37,6 +37,7 @@ export interface EmotionalBeat {
   musicCue?: string | null;
   musicVolumeMultiplier?: number | null;
   musicDirection?: string | null;
+  musicalFunction?: 'hook' | 'build' | 'peak' | 'resolve' | 'transition' | 'pause' | null;
 }
 
 export interface BlueprintInput {
@@ -77,6 +78,17 @@ export interface BlueprintInput {
     type: string;
     timing?: string | null;
     description?: string | null;
+  } | null;
+  /** Structured musical form from LLM (Tier 4). When present, overrides heuristic decisions. */
+  musicalStructure?: {
+    introType: string;
+    introBars: number;
+    bodyFeel: string;
+    peakMoment: string;
+    endingType: string;
+    outroBars: number;
+    keySignature?: string | null;
+    phraseLength?: number | null;
   } | null;
   /** Time signature (almost always 4/4 for ads) */
   timeSignature?: TimeSignature;
@@ -143,6 +155,18 @@ function classifySentenceFunction(
   total: number
 ): { energy: number; direction: MusicalSection['dynamicDirection']; label: string } {
   const position = total > 1 ? index / (total - 1) : 0.5;
+
+  // Tier 4: If the LLM provided an explicit musicalFunction, use it directly
+  if (cue?.musicalFunction) {
+    switch (cue.musicalFunction) {
+      case 'hook': return { energy: 4, direction: 'building', label: 'hook' };
+      case 'build': return { energy: 6, direction: 'building', label: 'build' };
+      case 'peak': return { energy: 8, direction: 'peak', label: 'peak' };
+      case 'resolve': return { energy: 5, direction: 'resolving', label: 'resolution' };
+      case 'transition': return { energy: 5, direction: 'sustaining', label: 'transition' };
+      case 'pause': return { energy: 3, direction: 'sustaining', label: 'pause' };
+    }
+  }
 
   // Use the cue's musicCue label if available
   const cueName = (cue?.musicCue || '').toLowerCase();
@@ -233,10 +257,14 @@ export function generateMusicalBlueprint(input: BlueprintInput): MusicalBlueprin
     instrumentation,
     arc,
     buttonEnding,
+    musicalStructure,
   } = input;
   const ts: TimeSignature = input.timeSignature || '4/4';
 
-  // 1. Calculate pre/post roll
+  // Phrase length from musicalStructure or default 4
+  const phraseLen = musicalStructure?.phraseLength ?? 4;
+
+  // 1. Calculate pre/post roll (override with musicalStructure if available)
   const prePost = calculatePrePostRoll(totalVoiceDuration, targetBPM, {
     genre,
     adDuration: totalVoiceDuration,
@@ -263,12 +291,17 @@ export function generateMusicalBlueprint(input: BlueprintInput): MusicalBlueprin
     timeSignature: ts,
   });
 
-  const totalBars = grid.totalBars;
-  const totalDuration = grid.totalDuration;
-  const preRollDuration = prePostFinal.preRollDuration;
-  const preRollBars = prePostFinal.preRollBars;
-  const postRollBars = prePostFinal.postRollBars;
-  const postRollDuration = prePostFinal.postRollDuration;
+  // Override pre/post roll with musicalStructure when available (Tier 4)
+  const preRollBars = musicalStructure?.introBars ?? prePostFinal.preRollBars;
+  const postRollBars = musicalStructure?.outroBars ?? prePostFinal.postRollBars;
+  const preRollDuration = preRollBars * barDuration;
+  const postRollDuration = postRollBars * barDuration;
+
+  // Recalculate total with potentially overridden pre/post roll
+  const adjustedTotalDuration = preRollDuration + totalVoiceDuration + postRollDuration;
+  const adjustedGrid = buildBarGrid(finalBPM, adjustedTotalDuration, ts);
+  const totalBars = adjustedGrid.totalBars;
+  const totalDuration = adjustedGrid.totalDuration;
   const voiceEntryPoint = preRollDuration;
 
   // 4. Map sentences to bar grid
@@ -297,8 +330,16 @@ export function generateMusicalBlueprint(input: BlueprintInput): MusicalBlueprin
 
   const sections: MusicalSection[] = [];
 
-  // Pre-roll section (intro)
+  // Pre-roll section (intro) -- enriched by musicalStructure when available
   const introEnergy = arc?.[0]?.energyLevel ?? 3;
+  const introTypeDesc = musicalStructure?.introType
+    ? ({
+        ambient_build: 'Ambient build, soft pads and textures, no rhythm.',
+        rhythmic_hook: 'Rhythmic hook, beat-driven opening, establishes groove.',
+        melodic_theme: 'Main melody theme intro, memorable hook.',
+        silence_to_entry: 'Near-silence, then music enters with voice.',
+      }[musicalStructure.introType] ?? 'Soft intro, building anticipation.')
+    : null;
   sections.push({
     name: 'intro',
     startBar: 1,
@@ -307,9 +348,8 @@ export function generateMusicalBlueprint(input: BlueprintInput): MusicalBlueprin
     endTime: preRollDuration,
     energyLevel: introEnergy,
     dynamicDirection: 'building',
-    instrumentationNotes: instrumentation
-      ? `${instrumentation.mids}, ${instrumentation.effects}. No drums yet.`
-      : 'Soft intro, building anticipation.',
+    instrumentationNotes: introTypeDesc
+      || (instrumentation ? `${instrumentation.mids}, ${instrumentation.effects}. No drums yet.` : 'Soft intro, building anticipation.'),
     voiceSentences: [],
   });
 
@@ -346,11 +386,13 @@ export function generateMusicalBlueprint(input: BlueprintInput): MusicalBlueprin
     const sectionName = matchingArc?.label || first.classification.label;
     const energy = matchingArc?.energyLevel ?? first.classification.energy;
 
-    // Snap section bars to 2-bar phrases for musical coherence
+    // Snap section bars to phrase boundaries for musical coherence
+    // Use phraseLength from musicalStructure (Tier 4) or default 2
+    const snapLen = Math.max(2, Math.min(phraseLen, 4));
     const rawStartBar = first.startBar;
     const rawEndBar = last.endBar;
-    const snappedStart = Math.max(preRollBars + 1, snapToPhrase(rawStartBar, 2));
-    const snappedEnd = Math.min(totalBars - postRollBars, Math.max(snappedStart + 1, snapToPhrase(rawEndBar, 2)));
+    const snappedStart = Math.max(preRollBars + 1, snapToPhrase(rawStartBar, snapLen));
+    const snappedEnd = Math.min(totalBars - postRollBars, Math.max(snappedStart + 1, snapToPhrase(rawEndBar, snapLen)));
 
     sections.push({
       name: sectionName,
@@ -366,8 +408,16 @@ export function generateMusicalBlueprint(input: BlueprintInput): MusicalBlueprin
     });
   }
 
-  // Post-roll section (outro/button ending)
+  // Post-roll section (outro/button ending) -- enriched by musicalStructure when available
   const outroStartBar = totalBars - postRollBars + 1;
+  const endingDesc = musicalStructure?.endingType
+    ? ({
+        button: 'Clean button ending, definitive chord cutoff.',
+        sustain: 'Sustained chord, natural ring-out.',
+        stinger: 'Short punchy stinger hit.',
+        decay: 'Natural instrument decay, organic ending.',
+      }[musicalStructure.endingType] ?? 'Clean button ending.')
+    : null;
   sections.push({
     name: 'outro',
     startBar: outroStartBar,
@@ -378,7 +428,7 @@ export function generateMusicalBlueprint(input: BlueprintInput): MusicalBlueprin
     dynamicDirection: 'resolving',
     instrumentationNotes: buttonEnding
       ? `${buttonEnding.type}${buttonEnding.description ? '. ' + buttonEnding.description : ''}`
-      : 'Clean button ending, sustained chord, definitive close.',
+      : (endingDesc || 'Clean button ending, sustained chord, definitive close.'),
     voiceSentences: [],
   });
 
@@ -413,6 +463,7 @@ export function generateMusicalBlueprint(input: BlueprintInput): MusicalBlueprin
     composerDirection,
     instrumentation,
     buttonEnding,
+    musicalStructure,
     ts,
     totalDuration,
   });
@@ -481,17 +532,20 @@ interface BarPromptInput {
   composerDirection?: string | null;
   instrumentation?: BlueprintInput['instrumentation'];
   buttonEnding?: BlueprintInput['buttonEnding'];
+  musicalStructure?: BlueprintInput['musicalStructure'];
   ts: TimeSignature;
   totalDuration: number;
 }
 
 function buildBarBasedPrompt(input: BarPromptInput): string {
-  const { finalBPM, totalBars, genre, mood, sections, composerDirection, instrumentation, buttonEnding, ts, totalDuration } = input;
+  const { finalBPM, totalBars, genre, mood, sections, composerDirection, instrumentation, buttonEnding, musicalStructure, ts, totalDuration } = input;
 
   const parts: string[] = [];
 
   // Header: BPM, time signature, key, total structure
-  parts.push(`${finalBPM} BPM, ${ts} time, ${mood} feel, ${totalBars} bars total (~${Math.round(totalDuration)}s).`);
+  const keyPart = musicalStructure?.keySignature ? `, ${musicalStructure.keySignature}` : '';
+  const bodyFeelPart = musicalStructure?.bodyFeel ? `, ${musicalStructure.bodyFeel} feel` : '';
+  parts.push(`${finalBPM} BPM, ${ts} time${keyPart}, ${mood}${bodyFeelPart}, ${totalBars} bars total (~${Math.round(totalDuration)}s).`);
 
   // Genre/style
   parts.push(`Genre: ${genre}. Instrumental only, no vocals.`);

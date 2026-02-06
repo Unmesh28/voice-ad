@@ -318,7 +318,65 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       loudnessTruePeak,
     });
 
-    await job.updateProgress(80);
+    await job.updateProgress(75);
+
+    // ========== TWO-PASS MIXING (Tier 4) ==========
+    // After the first mix, measure its loudness. If it's more than 3 LU off
+    // target, adjust music volume and remix for a tighter result.
+    if (normalizeLoudness && finalMusicPath && voicePath) {
+      try {
+        const measuredLoudness = await ffmpegService.measureLoudness(outputPath);
+        const loudnessGap = measuredLoudness - loudnessTargetLUFS;
+
+        logger.info(`[Two-pass] First mix loudness: ${measuredLoudness.toFixed(1)} LUFS (target: ${loudnessTargetLUFS}, gap: ${loudnessGap.toFixed(1)})`, {
+          productionId,
+        });
+
+        // If the gap is large, the music volume might be competing with the voice.
+        // Adjust: if mix is too loud (loudnessGap > 3), reduce music. If too quiet, boost music slightly.
+        if (Math.abs(loudnessGap) > 3) {
+          const adjustFactor = loudnessGap > 0 ? 0.7 : 1.3;
+          const adjustedMusicVolume = Math.max(0.05, Math.min(0.5, musicVolume * adjustFactor));
+
+          logger.info(`[Two-pass] Remixing: musicVolume ${musicVolume.toFixed(2)} → ${adjustedMusicVolume.toFixed(2)}`, {
+            productionId,
+            adjustFactor,
+          });
+
+          await ffmpegService.mixAudio({
+            voiceInput: {
+              filePath: voicePath,
+              volume: voiceVolume,
+              delay: voiceDelaySec > 0 ? voiceDelaySec : undefined,
+              fadeIn,
+              fadeOut,
+              fadeCurve,
+            },
+            musicInput: {
+              filePath: finalMusicPath,
+              volume: adjustedMusicVolume,
+            },
+            outputPath,
+            outputFormat: outputFormat as any,
+            audioDucking: alignmentResult ? false : audioDucking,
+            duckingAmount,
+            fadeCurve,
+            normalize: !normalizeLoudness,
+            normalizeLoudness,
+            loudnessTargetLUFS,
+            loudnessTruePeak,
+          });
+
+          const remeasured = await ffmpegService.measureLoudness(outputPath);
+          logger.info(`[Two-pass] Remixed loudness: ${remeasured.toFixed(1)} LUFS`, { productionId });
+        }
+      } catch (twoPassErr: any) {
+        // Non-fatal: if two-pass measurement fails, keep the first mix
+        logger.warn(`[Two-pass] Analysis failed, keeping first mix: ${twoPassErr.message}`);
+      }
+    }
+
+    await job.updateProgress(85);
 
     // Get duration
     const duration = await ffmpegService.getAudioDuration(outputPath);
