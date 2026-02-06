@@ -574,6 +574,11 @@ export class ProductionOrchestrator {
     await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 50, 'Speech generated! Creating music and sound effects...');
 
     // ── Stage 2b: SFX Generation (parallel with music) ────────────────
+    // Auto-enrich segments with SFX where the LLM didn't add them
+    const autoSfxAdded = sfxService.enrichSegmentsWithAutoSfx(adFormat.segments as any);
+    if (autoSfxAdded > 0) {
+      logger.info(`[Pipeline ${productionId}] Auto-SFX: enriched ${autoSfxAdded} segments with sound effects`);
+    }
     const sfxInputs = sfxService.extractSfxFromAdFormat(adFormat.segments);
     let sfxResultMap = new Map<number, any>();
 
