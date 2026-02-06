@@ -5,8 +5,28 @@
  * This module provides the math to convert between musical structure and time.
  */
 
-/** Standard time signatures. Ads almost always use 4/4. */
-export type TimeSignature = '4/4' | '3/4';
+/** Standard time signatures. Ads almost always use 4/4, but cultural genres may use others. */
+export type TimeSignature = '4/4' | '3/4' | '6/8' | '7/8' | '12/8';
+
+/** Get beats per bar for a time signature. Compound meters (6/8, 12/8) count in dotted-quarter groups. */
+export function beatsPerBarForTimeSignature(ts: TimeSignature): number {
+  switch (ts) {
+    case '3/4': return 3;
+    case '6/8': return 6;   // 2 groups of 3 eighth notes
+    case '7/8': return 7;
+    case '12/8': return 12; // 4 groups of 3 eighth notes
+    case '4/4':
+    default: return 4;
+  }
+}
+
+/** Get the beat unit duration multiplier relative to a quarter note.
+ *  For x/4 time: beat = quarter note (1.0).
+ *  For x/8 time: beat = eighth note (0.5). */
+function beatUnitMultiplier(ts: TimeSignature): number {
+  if (ts === '6/8' || ts === '7/8' || ts === '12/8') return 0.5;
+  return 1.0;
+}
 
 export interface BarGrid {
   /** BPM used for this grid */
@@ -74,21 +94,22 @@ export function buildBarGrid(
   totalDurationHint: number,
   timeSignature: TimeSignature = '4/4'
 ): BarGrid {
-  const beatsPerBar = timeSignature === '3/4' ? 3 : 4;
-  const beatDuration = 60 / bpm;
-  const barDuration = beatDuration * beatsPerBar;
+  const bpb = beatsPerBarForTimeSignature(timeSignature);
+  const quarterDuration = 60 / bpm;
+  const beatDuration = quarterDuration * beatUnitMultiplier(timeSignature);
+  const barDuration = beatDuration * bpb;
   const totalBars = Math.ceil(totalDurationHint / barDuration);
   const totalDuration = totalBars * barDuration;
 
-  return { bpm, beatsPerBar, beatDuration, barDuration, totalBars, totalDuration };
+  return { bpm, beatsPerBar: bpb, beatDuration, barDuration, totalBars, totalDuration };
 }
 
 /**
  * Round a duration UP to the nearest whole bar boundary.
  */
 export function ceilToBar(seconds: number, bpm: number, timeSignature: TimeSignature = '4/4'): BarAlignedDuration {
-  const beatsPerBar = timeSignature === '3/4' ? 3 : 4;
-  const barDuration = (60 / bpm) * beatsPerBar;
+  const bpb = beatsPerBarForTimeSignature(timeSignature);
+  const barDuration = (60 / bpm) * beatUnitMultiplier(timeSignature) * bpb;
   const bars = Math.ceil(seconds / barDuration);
   return { duration: bars * barDuration, bars, bpm, barDuration };
 }
@@ -97,8 +118,8 @@ export function ceilToBar(seconds: number, bpm: number, timeSignature: TimeSigna
  * Round a duration DOWN to the nearest whole bar boundary.
  */
 export function floorToBar(seconds: number, bpm: number, timeSignature: TimeSignature = '4/4'): BarAlignedDuration {
-  const beatsPerBar = timeSignature === '3/4' ? 3 : 4;
-  const barDuration = (60 / bpm) * beatsPerBar;
+  const bpb = beatsPerBarForTimeSignature(timeSignature);
+  const barDuration = (60 / bpm) * beatUnitMultiplier(timeSignature) * bpb;
   const bars = Math.max(1, Math.floor(seconds / barDuration));
   return { duration: bars * barDuration, bars, bpm, barDuration };
 }
@@ -107,8 +128,8 @@ export function floorToBar(seconds: number, bpm: number, timeSignature: TimeSign
  * Round a duration to the NEAREST whole bar boundary.
  */
 export function roundToBar(seconds: number, bpm: number, timeSignature: TimeSignature = '4/4'): BarAlignedDuration {
-  const beatsPerBar = timeSignature === '3/4' ? 3 : 4;
-  const barDuration = (60 / bpm) * beatsPerBar;
+  const bpb = beatsPerBarForTimeSignature(timeSignature);
+  const barDuration = (60 / bpm) * beatUnitMultiplier(timeSignature) * bpb;
   const bars = Math.max(1, Math.round(seconds / barDuration));
   return { duration: bars * barDuration, bars, bpm, barDuration };
 }
@@ -131,8 +152,7 @@ export function calculatePrePostRoll(
   } = {}
 ): PrePostRoll {
   const ts = options.timeSignature || '4/4';
-  const beatsPerBar = ts === '3/4' ? 3 : 4;
-  const barDuration = (60 / bpm) * beatsPerBar;
+  const barDuration = (60 / bpm) * beatUnitMultiplier(ts) * beatsPerBarForTimeSignature(ts);
 
   // Decide pre-roll bars based on ad length
   const totalHint = options.adDuration || voiceDuration;
@@ -191,8 +211,8 @@ export function createLoopPlan(
   maxGenDuration: number = 22,
   timeSignature: TimeSignature = '4/4'
 ): LoopPlan {
-  const beatsPerBar = timeSignature === '3/4' ? 3 : 4;
-  const barDuration = (60 / bpm) * beatsPerBar;
+  const bpb = beatsPerBarForTimeSignature(timeSignature);
+  const barDuration = (60 / bpm) * beatUnitMultiplier(timeSignature) * bpb;
 
   // How many whole bars fit in the max generation window?
   const maxBars = Math.floor(maxGenDuration / barDuration);
@@ -227,8 +247,8 @@ export function nearestDownbeat(
   bpm: number,
   timeSignature: TimeSignature = '4/4'
 ): { time: number; bar: number; offset: number } {
-  const beatsPerBar = timeSignature === '3/4' ? 3 : 4;
-  const barDuration = (60 / bpm) * beatsPerBar;
+  const bpb = beatsPerBarForTimeSignature(timeSignature);
+  const barDuration = (60 / bpm) * beatUnitMultiplier(timeSignature) * bpb;
   const bar = Math.round(timestamp / barDuration);
   const time = bar * barDuration;
   return { time, bar, offset: timestamp - time };
@@ -264,7 +284,8 @@ export function optimizeBPMForDuration(
 ): { bpm: number; bars: number; exactDuration: number; error: number } {
   const range = options.bpmRange ?? 5;
   const ts = options.timeSignature || '4/4';
-  const beatsPerBar = ts === '3/4' ? 3 : 4;
+  const bpb = beatsPerBarForTimeSignature(ts);
+  const bum = beatUnitMultiplier(ts);
 
   let bestBPM = targetBPM;
   let bestError = Infinity;
@@ -275,7 +296,7 @@ export function optimizeBPMForDuration(
   for (let bpm = targetBPM - range; bpm <= targetBPM + range; bpm++) {
     if (bpm < 40 || bpm > 200) continue;
 
-    const barDuration = (60 / bpm) * beatsPerBar;
+    const barDuration = (60 / bpm) * bum * bpb;
     const bars = Math.round(targetDuration / barDuration);
     if (bars < 1) continue;
 
@@ -301,8 +322,8 @@ export function generateDownbeats(
   totalBars: number,
   timeSignature: TimeSignature = '4/4'
 ): number[] {
-  const beatsPerBar = timeSignature === '3/4' ? 3 : 4;
-  const barDuration = (60 / bpm) * beatsPerBar;
+  const bpb = beatsPerBarForTimeSignature(timeSignature);
+  const barDuration = (60 / bpm) * beatUnitMultiplier(timeSignature) * bpb;
   const downbeats: number[] = [];
   for (let i = 0; i <= totalBars; i++) {
     downbeats.push(i * barDuration);
@@ -383,8 +404,7 @@ export function alignMusicToVoice(
     timeSignature: ts,
   });
 
-  const beatsPerBar = ts === '3/4' ? 3 : 4;
-  const barDuration = (60 / bpm) * beatsPerBar;
+  const barDuration = (60 / bpm) * beatUnitMultiplier(ts) * beatsPerBarForTimeSignature(ts);
 
   // Total music needed = pre-roll + voice + post-roll, rounded up to whole bars
   const totalNeeded = prePost.totalMusicDuration;

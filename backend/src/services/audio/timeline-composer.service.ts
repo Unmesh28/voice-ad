@@ -170,11 +170,17 @@ class TimelineComposerService {
     let preparedMusicPath = musicFilePath;
 
     if (musicDuration < totalDuration - 0.5) {
-      // Music too short — extend by looping
+      // Music too short — extend with beat-aware crossfaded looping
       const extendedPath = path.join(outputDir, `timeline_music_ext_${uuidv4().slice(0, 8)}.mp3`);
-      await ffmpegService.extendAudioDuration(musicFilePath, totalDuration, extendedPath);
+      // Estimate bar duration from first two music volume segments for loop alignment
+      const firstFullSeg = musicVolumeSegments.find((s) => s.behavior === 'full');
+      const estimatedBarDuration = firstFullSeg ? Math.min(2.0, firstFullSeg.endTime - firstFullSeg.startTime) : undefined;
+      await ffmpegService.extendAudioWithCrossfade(musicFilePath, totalDuration, extendedPath, {
+        barDuration: estimatedBarDuration,
+        crossfadeDuration: 0.5,
+      });
       preparedMusicPath = extendedPath;
-      logger.info(`Music extended from ${musicDuration.toFixed(1)}s to ${totalDuration.toFixed(1)}s`);
+      logger.info(`Music extended from ${musicDuration.toFixed(1)}s to ${totalDuration.toFixed(1)}s (beat-aware crossfade)`);
     } else if (musicDuration > totalDuration + 1) {
       // Music too long — simple trim from start
       const trimmedPath = path.join(outputDir, `timeline_music_trim_${uuidv4().slice(0, 8)}.mp3`);
@@ -187,15 +193,46 @@ class TimelineComposerService {
     const envelopedMusicPath = path.join(outputDir, `timeline_music_env_${uuidv4().slice(0, 8)}.mp3`);
     await this.applyMusicVolumeEnvelope(preparedMusicPath, musicVolumeSegments, totalDuration, envelopedMusicPath);
 
-    // 4. Compute fade-out: use the trailing music-after-voice duration
+    // 4. Sidechain ducking: dynamically compress music when voice is present.
+    //    This makes ducking responsive to actual speech rhythm rather than
+    //    static volume levels. Falls back to envelope-only if sidechain fails.
+    let finalMusicPath = envelopedMusicPath;
+    const voiceEntries = timeline.filter((e) => e.type === 'voice' && e.filePath && fs.existsSync(e.filePath));
+
+    if (voiceEntries.length > 0) {
+      try {
+        // Create a combined voice reference track for the sidechain key
+        const voiceRefPath = path.join(outputDir, `timeline_voiceref_${uuidv4().slice(0, 8)}.mp3`);
+        await ffmpegService.createVoiceReference(
+          voiceEntries.map((e) => ({ filePath: e.filePath, startTime: e.startTime, volume: e.volume })),
+          totalDuration,
+          voiceRefPath
+        );
+
+        // Apply multiband sidechain ducking (only ducks 500–4000 Hz under voice)
+        const sidechainedPath = path.join(outputDir, `timeline_music_sc_${uuidv4().slice(0, 8)}.mp3`);
+        await ffmpegService.applySidechainDucking(envelopedMusicPath, voiceRefPath, sidechainedPath);
+        finalMusicPath = sidechainedPath;
+
+        logger.info('Sidechain ducking applied to music');
+
+        // Cleanup voice reference
+        ffmpegService.cleanupFile(voiceRefPath).catch(() => {});
+      } catch (scErr: any) {
+        logger.warn(`Sidechain ducking failed, using envelope-only: ${scErr.message}`);
+        finalMusicPath = envelopedMusicPath;
+      }
+    }
+
+    // 5. Compute fade-out: use the trailing music-after-voice duration
     //    so the music fades out smoothly right as the voice ends.
     const trailingMusic = totalDuration - lastVoiceEndTime;
     const effectiveFadeOut = Math.max(fadeOut, trailingMusic);
 
-    // 5. Build and run the FFmpeg filter_complex
+    // 6. Build and run the FFmpeg filter_complex
     await this.buildAndRunMix({
       timeline,
-      envelopedMusicPath,
+      envelopedMusicPath: finalMusicPath,
       totalDuration,
       outputPath,
       fadeIn,
@@ -208,14 +245,12 @@ class TimelineComposerService {
 
     const finalDuration = await ffmpegService.getAudioDuration(outputPath);
 
-    // 5. Cleanup temp files
-    for (const tempPath of [envelopedMusicPath]) {
-      if (tempPath !== musicFilePath) {
-        ffmpegService.cleanupFile(tempPath).catch(() => {});
-      }
-    }
-    if (preparedMusicPath !== musicFilePath) {
-      ffmpegService.cleanupFile(preparedMusicPath).catch(() => {});
+    // 7. Cleanup temp files
+    const tempFiles = [envelopedMusicPath, finalMusicPath, preparedMusicPath].filter(
+      (p) => p !== musicFilePath
+    );
+    for (const tempPath of new Set(tempFiles)) {
+      ffmpegService.cleanupFile(tempPath).catch(() => {});
     }
 
     logger.info('Timeline composer: composition complete', {
@@ -259,7 +294,8 @@ class TimelineComposerService {
 
     let cursor = 0; // current time position
 
-    for (const seg of segments) {
+    for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+      const seg = segments[segIdx];
       const segStart = cursor;
       const segEnd = cursor + seg.duration;
 
@@ -301,7 +337,85 @@ class TimelineComposerService {
         behavior: musicBehavior,
       });
 
-      cursor = segEnd;
+      // --- Transition to next segment ---
+      // Apply transition effects between this segment and the next one.
+      // This modifies the cursor position and/or music volume at boundaries.
+      const nextSeg = segIdx < segments.length - 1 ? segments[segIdx + 1] : null;
+      if (nextSeg) {
+        const transition = seg.transition || 'hard_cut';
+        const transitionDur = seg.transitionDuration ?? this.defaultTransitionDuration(transition);
+
+        switch (transition) {
+          case 'crossfade': {
+            // Overlap: pull the next segment back by transitionDur.
+            // Both segments play simultaneously during the overlap region.
+            // Music crossfades between the two segments' volumes.
+            const overlap = Math.min(transitionDur, seg.duration * 0.5);
+            if (overlap > 0.05) {
+              cursor = segEnd - overlap;
+
+              // Add a transition music volume ramp during the overlap
+              const nextMusicBehavior = nextSeg.music?.behavior ?? 'none';
+              const nextMusicVol = this.resolveMusicVolume(nextMusicBehavior, nextSeg.music?.volume, baseMusicVolume);
+              const midVol = (musicVolForSegment + nextMusicVol) / 2;
+
+              // Shorten the current music segment and add a ramp region
+              musicVolumeSegments[musicVolumeSegments.length - 1].endTime = segEnd - overlap;
+              musicVolumeSegments.push({
+                startTime: segEnd - overlap,
+                endTime: segEnd,
+                volume: midVol,
+                behavior: 'resolving', // Use resolving for smooth ramp
+              });
+
+              logger.debug(`Transition: crossfade ${overlap.toFixed(2)}s between "${seg.label}" → "${nextSeg.label}"`);
+            } else {
+              cursor = segEnd;
+            }
+            break;
+          }
+
+          case 'duck_transition': {
+            // Duck: briefly drop music volume at the boundary, then bring it back.
+            // Creates a momentary "dip" that makes the transition feel clean.
+            const duckDur = Math.min(transitionDur, 0.5);
+            if (duckDur > 0.05) {
+              const duckVol = Math.min(musicVolForSegment, baseMusicVolume) * 0.5;
+
+              // Add a duck region at the end of this segment
+              const duckStart = Math.max(segStart, segEnd - duckDur);
+              musicVolumeSegments[musicVolumeSegments.length - 1].endTime = duckStart;
+              musicVolumeSegments.push({
+                startTime: duckStart,
+                endTime: segEnd,
+                volume: duckVol,
+                behavior: 'ducked',
+              });
+
+              logger.debug(`Transition: duck ${duckDur.toFixed(2)}s at end of "${seg.label}"`);
+            }
+            cursor = segEnd;
+            break;
+          }
+
+          case 'natural': {
+            // Natural: let the music phrase handle the transition.
+            // We just ensure a smooth volume ramp at the boundary (handled by
+            // applyVolumeCurve's ramp logic) — no special timeline changes.
+            cursor = segEnd;
+            break;
+          }
+
+          case 'hard_cut':
+          default: {
+            // Hard cut: no overlap, no ducking — immediate switch.
+            cursor = segEnd;
+            break;
+          }
+        }
+      } else {
+        cursor = segEnd;
+      }
     }
 
     // ── Align music ending with voiceover ending ───────────────────────
@@ -381,6 +495,19 @@ class TimelineComposerService {
     }
 
     return { timeline, musicVolumeSegments, totalDuration: cursor, lastVoiceEndTime: lastVoiceEnd };
+  }
+
+  /**
+   * Default transition duration when not specified by the LLM.
+   */
+  private defaultTransitionDuration(transition: string): number {
+    switch (transition) {
+      case 'crossfade': return 0.3;
+      case 'duck_transition': return 0.25;
+      case 'natural': return 0;
+      case 'hard_cut':
+      default: return 0;
+    }
   }
 
   /**

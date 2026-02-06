@@ -23,6 +23,7 @@ import sfxService from './sfx/sfx.service';
 import timelineComposerService from './audio/timeline-composer.service';
 import ffmpegService from './audio/ffmpeg.service';
 import type { AdCreativePlan } from '../types/ad-format';
+import musicQualityService from './music/music-quality.service';
 import mongoose from 'mongoose';
 
 interface QuickProductionInput {
@@ -372,20 +373,31 @@ export class ProductionOrchestrator {
       if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
       logger.info(`[Pipeline ${productionId}] Music generated: ${musicResult.musicId}`);
 
-      // ========== MUSIC QUALITY GATE (Tier 4) ==========
-      // Quick check: is the generated track's duration within acceptable range?
-      // If it's way too short (>30% below requested), regenerate once.
+      // ========== MUSIC QUALITY GATE ==========
+      // Multi-dimensional quality scoring: duration, loudness, silence, dynamics.
+      // If score is below threshold, regenerate once.
       const requestedDuration = musicRequestDuration;
       try {
         const musicTrack = await MusicTrack.findById(musicResult.musicId);
-        if (musicTrack?.duration && requestedDuration > 0) {
-          const actualDuration = musicTrack.duration;
-          const durationRatio = actualDuration / requestedDuration;
-          logger.info(`[Pipeline ${productionId}] Quality gate: requested=${requestedDuration}s, actual=${actualDuration}s, ratio=${durationRatio.toFixed(2)}`);
+        if (musicTrack?.fileUrl && requestedDuration > 0) {
+          const trackPath = path.join(
+            path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads'),
+            musicTrack.fileUrl.replace('/uploads/', '')
+          );
+          const quality = await musicQualityService.scoreTrack({
+            musicPath: trackPath,
+            expectedDuration: requestedDuration,
+            genre: musicGenre,
+          });
 
-          if (durationRatio < 0.7) {
-            logger.warn(`[Pipeline ${productionId}] Music too short (${actualDuration}s vs ${requestedDuration}s). Regenerating once...`);
-            await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 55, 'Regenerating music for better match...');
+          logger.info(`[Pipeline ${productionId}] Quality gate: score=${quality.score}, ${quality.summary}`, {
+            dimensions: quality.dimensions,
+            measurements: quality.measurements,
+          });
+
+          if (!quality.acceptable) {
+            logger.warn(`[Pipeline ${productionId}] Music quality below threshold (${quality.score}). Regenerating...`);
+            await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 55, 'Regenerating music for better quality...');
 
             const retryJob = await musicGenerationQueue.add('generate-music', {
               userId,
@@ -652,6 +664,11 @@ export class ProductionOrchestrator {
     }
 
     const musicRequestDuration = blueprint ? Math.ceil(blueprint.totalDuration) : Math.ceil(adFormat.totalDuration);
+
+    // Enable segment-based generation when the LLM provided a multi-segment arc
+    const musicArc = scriptMetadata?.music?.arc as { startSeconds: number; endSeconds: number; label: string; musicPrompt: string; targetBPM?: number; energyLevel?: number }[] | undefined;
+    const useSegmentGeneration = Array.isArray(musicArc) && musicArc.length >= 2;
+
     const musicJob = await musicGenerationQueue.add('generate-music', {
       userId,
       text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
@@ -664,19 +681,38 @@ export class ProductionOrchestrator {
       sunoTitle: sunoPayload?.title,
       sunoStyle: sunoPayload?.style,
       sunoPrompt: sunoPayload?.prompt,
-      segmentBasedGeneration: false,
+      segmentBasedGeneration: useSegmentGeneration,
+      arc: useSegmentGeneration ? musicArc : undefined,
+      enableSmartOverlap: true,
+      musicMetadata: useSegmentGeneration ? {
+        instrumentation: scriptMetadata?.music?.instrumentation,
+        composerDirection: scriptMetadata?.music?.composerDirection,
+        buttonEnding: scriptMetadata?.music?.buttonEnding,
+      } : undefined,
     });
+    logger.info(`[Pipeline ${productionId}] Music generation: ${useSegmentGeneration ? `segment-based (${musicArc!.length} segments)` : 'single-track'}`);
     let musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
     if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
 
-    // Quality gate (same as legacy)
+    // Quality gate — multi-dimensional scoring
     try {
-      const musicTrack = await MusicTrack.findById(musicResult.musicId);
-      if (musicTrack?.duration && musicRequestDuration > 0) {
-        const durationRatio = musicTrack.duration / musicRequestDuration;
-        if (durationRatio < 0.7) {
-          logger.warn(`[Pipeline ${productionId}] Music too short (${musicTrack.duration}s vs ${musicRequestDuration}s). Regenerating...`);
-          await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 60, 'Regenerating music for better match...');
+      const musicTrackForGate = await MusicTrack.findById(musicResult.musicId);
+      if (musicTrackForGate?.fileUrl && musicRequestDuration > 0) {
+        const trackPath = path.join(uploadDir, musicTrackForGate.fileUrl.replace('/uploads/', ''));
+        const quality = await musicQualityService.scoreTrack({
+          musicPath: trackPath,
+          expectedDuration: musicRequestDuration,
+          genre: musicGenre,
+        });
+
+        logger.info(`[Pipeline ${productionId}] Quality gate: score=${quality.score}, ${quality.summary}`, {
+          dimensions: quality.dimensions,
+        });
+
+        if (!quality.acceptable) {
+          logger.warn(`[Pipeline ${productionId}] Music quality below threshold (${quality.score}). Regenerating...`);
+          await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 60, 'Regenerating music for better quality...');
+          // Retry with single-track (more reliable)
           const retryJob = await musicGenerationQueue.add('generate-music', {
             userId,
             text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
@@ -716,7 +752,19 @@ export class ProductionOrchestrator {
     // Resolve music file path
     const musicTrack = await MusicTrack.findById(musicResult.musicId);
     if (!musicTrack?.fileUrl) throw new Error('Music track file URL not found');
-    const musicFilePath = path.join(uploadDir, musicTrack.fileUrl.replace('/uploads/', ''));
+    const rawMusicPath = path.join(uploadDir, musicTrack.fileUrl.replace('/uploads/', ''));
+
+    // Apply voice-support EQ to the music track (carves 3kHz for voice clarity)
+    const eqMusicPath = rawMusicPath.replace(/\.mp3$/, '_eq.mp3');
+    let musicFilePath: string;
+    try {
+      await ffmpegService.applyVoiceSupportEQ(rawMusicPath, eqMusicPath);
+      musicFilePath = eqMusicPath;
+      logger.info(`[Pipeline ${productionId}] Voice-support EQ applied to music`);
+    } catch (eqErr: any) {
+      logger.warn(`[Pipeline ${productionId}] EQ failed, using raw music: ${eqErr.message}`);
+      musicFilePath = rawMusicPath;
+    }
 
     // Ensure productions directory exists
     const productionsDir = path.join(uploadDir, 'productions');

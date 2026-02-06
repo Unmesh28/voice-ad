@@ -2,10 +2,12 @@ import ffmpeg from 'fluent-ffmpeg';
 import { logger } from '../../config/logger';
 import fs from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { AudioLayer, MultiLayerMixOptions, MasteringOptions } from '../../types/audio.types';
 
 const unlinkAsync = promisify(fs.unlink);
+const execAsync = promisify(exec);
 
 /** Fade curve: linear (tri), exp, qsin – maps to FFmpeg afade curve param */
 export type FadeCurveType = 'linear' | 'exp' | 'qsin';
@@ -994,6 +996,523 @@ class FFmpegService {
     } catch (error: any) {
       logger.warn(`Loudness measurement failed: ${error.message}`);
       return -16; // Default fallback
+    }
+  }
+
+  /**
+   * Apply frequency-aware sidechain ducking to music using voice as key signal.
+   *
+   * Splits music into 3 frequency bands:
+   *   - Low  (<500 Hz):  untouched — keeps bass fullness
+   *   - Mid  (500–4000 Hz): compressed when voice is present — clears space for voice
+   *   - High (>4000 Hz): untouched — keeps air/shimmer
+   *
+   * This sounds more natural than flat volume ducking because the bass and
+   * treble continue at full level while only voice-competing frequencies duck.
+   *
+   * Falls back to full-signal sidechain compression if multiband fails.
+   */
+  async applySidechainDucking(
+    musicPath: string,
+    voicePath: string,
+    outputPath: string,
+    opts?: {
+      /** Compressor threshold in dB (default -25) */
+      threshold?: number;
+      /** Compression ratio (default 6) */
+      ratio?: number;
+      /** Attack in ms (default 5) */
+      attack?: number;
+      /** Release in ms (default 150) */
+      release?: number;
+      /** Crossover low→mid frequency in Hz (default 500) */
+      crossoverLow?: number;
+      /** Crossover mid→high frequency in Hz (default 4000) */
+      crossoverHigh?: number;
+    }
+  ): Promise<string> {
+    const {
+      threshold = -25,
+      ratio = 6,
+      attack = 5,
+      release = 150,
+      crossoverLow = 500,
+      crossoverHigh = 4000,
+    } = opts || {};
+
+    // Try multiband first, fall back to full-signal sidechain
+    try {
+      return await this.applySidechainDuckingMultiband(
+        musicPath, voicePath, outputPath,
+        { threshold, ratio, attack, release, crossoverLow, crossoverHigh }
+      );
+    } catch (multibandErr: any) {
+      logger.warn(`Multiband sidechain failed, trying full-signal: ${multibandErr.message}`);
+      return await this.applySidechainDuckingFullSignal(
+        musicPath, voicePath, outputPath,
+        { threshold, ratio, attack, release }
+      );
+    }
+  }
+
+  /**
+   * Multiband sidechain: split music into 3 bands, compress only the mid band.
+   */
+  private applySidechainDuckingMultiband(
+    musicPath: string,
+    voicePath: string,
+    outputPath: string,
+    opts: { threshold: number; ratio: number; attack: number; release: number; crossoverLow: number; crossoverHigh: number }
+  ): Promise<string> {
+    const { threshold, ratio, attack, release, crossoverLow, crossoverHigh } = opts;
+
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info('Applying multiband sidechain ducking', {
+          threshold, ratio, attack, release, crossoverLow, crossoverHigh,
+        });
+
+        const command = ffmpeg();
+        command.input(musicPath);  // [0:a] = music
+        command.input(voicePath);  // [1:a] = voice (sidechain key)
+
+        const SAMPLE_RATE = 44100;
+        const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
+
+        // Filter graph:
+        // 1. Normalize both inputs
+        // 2. Split music into 3 frequency bands
+        // 3. Sidechain compress mid band only using voice
+        // 4. Boost each band by 3x to compensate for amix ÷3 normalization
+        // 5. Recombine all bands
+        const filters = [
+          `[0:a]${norm}[music]`,
+          `[1:a]${norm}[voice]`,
+
+          // Split music into 3 bands
+          `[music]asplit=3[m1][m2][m3]`,
+
+          // Low band: everything below crossoverLow
+          `[m1]lowpass=f=${crossoverLow}:poles=2,volume=3.0[low]`,
+
+          // Mid band: between crossoverLow and crossoverHigh
+          `[m2]highpass=f=${crossoverLow}:poles=2,lowpass=f=${crossoverHigh}:poles=2[mid_raw]`,
+
+          // High band: everything above crossoverHigh
+          `[m3]highpass=f=${crossoverHigh}:poles=2,volume=3.0[high]`,
+
+          // Sidechain compress mid band — voice triggers compression
+          `[mid_raw][voice]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release}:level_sc=1:mix=0.7,volume=3.0[mid]`,
+
+          // Recombine all bands (amix divides by 3, so the 3x volume above compensates)
+          `[low][mid][high]amix=inputs=3:duration=longest:dropout_transition=0[out]`,
+        ];
+
+        const filterStr = filters.join(';');
+        command.outputOptions(['-filter_complex', filterStr, '-map', '[out]']);
+        this.setOutputOptions(command, 'mp3');
+        command.output(outputPath);
+
+        command
+          .on('start', (commandLine: string) => {
+            logger.debug('Multiband sidechain FFmpeg:', commandLine.slice(0, 500));
+          })
+          .on('end', () => {
+            logger.info('Multiband sidechain ducking applied:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('Multiband sidechain FFmpeg error:', msg);
+            reject(new Error(`Multiband sidechain ducking failed: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Full-signal sidechain: compress the entire music signal (fallback).
+   */
+  private applySidechainDuckingFullSignal(
+    musicPath: string,
+    voicePath: string,
+    outputPath: string,
+    opts: { threshold: number; ratio: number; attack: number; release: number }
+  ): Promise<string> {
+    const { threshold, ratio, attack, release } = opts;
+
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info('Applying full-signal sidechain ducking (fallback)');
+
+        const command = ffmpeg();
+        command.input(musicPath);
+        command.input(voicePath);
+
+        const SAMPLE_RATE = 44100;
+        const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
+
+        const filters = [
+          `[0:a]${norm}[music]`,
+          `[1:a]${norm}[voice]`,
+          `[music][voice]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release}:level_sc=1:mix=0.6[out]`,
+        ];
+
+        const filterStr = filters.join(';');
+        command.outputOptions(['-filter_complex', filterStr, '-map', '[out]']);
+        this.setOutputOptions(command, 'mp3');
+        command.output(outputPath);
+
+        command
+          .on('end', () => {
+            logger.info('Full-signal sidechain ducking applied:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('Full-signal sidechain FFmpeg error:', msg);
+            reject(new Error(`Full-signal sidechain ducking failed: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Create a combined voice reference track from multiple positioned voice entries.
+   * Used as the sidechain key signal for dynamic music ducking.
+   */
+  async createVoiceReference(
+    entries: { filePath: string; startTime: number; volume: number }[],
+    totalDuration: number,
+    outputPath: string
+  ): Promise<string> {
+    if (entries.length === 0) {
+      throw new Error('createVoiceReference requires at least one voice entry');
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const command = ffmpeg();
+        const SAMPLE_RATE = 44100;
+        const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
+
+        for (const entry of entries) {
+          command.input(entry.filePath);
+        }
+
+        const filters: string[] = [];
+        const labels: string[] = [];
+
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries[i];
+          const label = `v${i}`;
+          const delayMs = Math.round(entry.startTime * 1000);
+
+          if (delayMs > 0) {
+            filters.push(`[${i}:a]${norm},volume=${entry.volume},adelay=${delayMs}|${delayMs}[${label}]`);
+          } else {
+            filters.push(`[${i}:a]${norm},volume=${entry.volume}[${label}]`);
+          }
+          labels.push(`[${label}]`);
+        }
+
+        // Mix all voice entries together
+        if (entries.length === 1) {
+          // Single voice — just trim to duration
+          filters.push(`${labels[0]}atrim=0:${totalDuration},asetpts=PTS-STARTPTS[out]`);
+        } else {
+          filters.push(
+            `${labels.join('')}amix=inputs=${entries.length}:duration=longest:dropout_transition=2[mixed]`
+          );
+          filters.push(`[mixed]atrim=0:${totalDuration},asetpts=PTS-STARTPTS[out]`);
+        }
+
+        const filterStr = filters.join(';');
+        command.outputOptions(['-filter_complex', filterStr, '-map', '[out]']);
+        this.setOutputOptions(command, 'mp3');
+        command.output(outputPath);
+
+        command
+          .on('end', () => {
+            logger.info('Voice reference track created:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('Voice reference FFmpeg error:', msg);
+            reject(new Error(`Failed to create voice reference: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Apply voice-supportive EQ to a music track.
+   * Carves frequency space for voice intelligibility:
+   *   - High-pass at 30Hz (remove sub-bass rumble)
+   *   - Notch at 3kHz (-4dB, Q=1.0) — carve the voice presence band
+   *   - Shelf lift at 8kHz (+2dB) — add air/brightness above voice range
+   */
+  async applyVoiceSupportEQ(
+    inputPath: string,
+    outputPath: string
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info('Applying voice-support EQ to music track');
+        const command = ffmpeg(inputPath);
+
+        const eqFilter = [
+          'highpass=f=30:poles=2',
+          'equalizer=f=3000:t=q:w=1.0:g=-4',
+          'equalizer=f=8000:t=h:g=2',
+        ].join(',');
+
+        command
+          .audioFilters(eqFilter)
+          .audioCodec('libmp3lame')
+          .audioBitrate('192k')
+          .audioChannels(2)
+          .audioFrequency(44100)
+          .output(outputPath);
+
+        command
+          .on('end', () => {
+            logger.info('Voice-support EQ applied:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('FFmpeg voice-support EQ error:', msg);
+            reject(new Error(`Failed to apply voice-support EQ: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Find candidate loop points in an audio file by analyzing energy levels.
+   * Returns timestamps where the audio energy is similar to the start,
+   * making them good candidates for seamless looping.
+   *
+   * When barDuration is provided, loop points are snapped to bar boundaries.
+   */
+  async findLoopPoints(
+    musicPath: string,
+    opts?: {
+      /** Duration of one bar in seconds (for bar-aligned loop points) */
+      barDuration?: number;
+      /** Minimum loop length in seconds (default 4) */
+      minLoopLength?: number;
+      /** Maximum number of candidates to return (default 5) */
+      maxCandidates?: number;
+    }
+  ): Promise<{ timestamp: number; energyDiff: number }[]> {
+    const { barDuration, minLoopLength = 4, maxCandidates = 5 } = opts || {};
+
+    try {
+      const duration = await this.getAudioDuration(musicPath);
+      if (duration < minLoopLength * 2) {
+        return [{ timestamp: duration / 2, energyDiff: 0 }];
+      }
+
+      // Measure RMS energy in small windows across the track
+      const { stderr } = await execAsync(
+        `ffmpeg -i "${musicPath}" -af "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-" -f null - 2>&1`,
+        { maxBuffer: 10 * 1024 * 1024, timeout: 30000 }
+      );
+
+      // Parse per-frame RMS levels
+      const rmsValues: number[] = [];
+      const rmsMatches = stderr.matchAll(/RMS_level=(-?[\d.]+)/g);
+      for (const m of rmsMatches) {
+        const val = parseFloat(m[1]);
+        if (isFinite(val) && val > -100) rmsValues.push(val);
+      }
+
+      if (rmsValues.length < 10) {
+        // Fallback: use midpoint or bar boundaries
+        if (barDuration && barDuration > 0) {
+          const midBar = Math.floor(duration / 2 / barDuration) * barDuration;
+          return [{ timestamp: Math.max(minLoopLength, midBar), energyDiff: 0 }];
+        }
+        return [{ timestamp: duration / 2, energyDiff: 0 }];
+      }
+
+      // Time per RMS sample
+      const timePerSample = duration / rmsValues.length;
+
+      // Get the energy of the start region (first ~2s)
+      const startSamples = Math.min(20, Math.ceil(2.0 / timePerSample));
+      const startEnergy = rmsValues.slice(0, startSamples).reduce((a, b) => a + b, 0) / startSamples;
+
+      // Find points where energy is similar to start (good loop points)
+      const candidates: { timestamp: number; energyDiff: number }[] = [];
+      const minSampleIdx = Math.ceil(minLoopLength / timePerSample);
+
+      for (let i = minSampleIdx; i < rmsValues.length - startSamples; i++) {
+        // Average energy in a window around this point
+        const windowSize = Math.min(startSamples, rmsValues.length - i);
+        const windowEnergy = rmsValues.slice(i, i + windowSize).reduce((a, b) => a + b, 0) / windowSize;
+        const energyDiff = Math.abs(windowEnergy - startEnergy);
+
+        let timestamp = i * timePerSample;
+
+        // Snap to bar boundary if barDuration is provided
+        if (barDuration && barDuration > 0) {
+          timestamp = Math.round(timestamp / barDuration) * barDuration;
+          // Skip if snapped to same point as previous candidate
+          if (candidates.length > 0 && Math.abs(candidates[candidates.length - 1].timestamp - timestamp) < barDuration * 0.5) {
+            continue;
+          }
+        }
+
+        // Ensure minimum loop length after snapping
+        if (timestamp < minLoopLength) continue;
+
+        candidates.push({ timestamp, energyDiff });
+      }
+
+      // Sort by energy similarity (lower diff = better loop point)
+      candidates.sort((a, b) => a.energyDiff - b.energyDiff);
+
+      const result = candidates.slice(0, maxCandidates);
+      logger.info(`Found ${result.length} loop point candidates`, {
+        best: result[0]?.timestamp.toFixed(2),
+        energyDiff: result[0]?.energyDiff.toFixed(2),
+      });
+
+      return result.length > 0 ? result : [{ timestamp: duration / 2, energyDiff: 0 }];
+    } catch (err: any) {
+      logger.warn(`Loop-point detection failed: ${err.message}`);
+      return [{ timestamp: minLoopLength, energyDiff: 0 }];
+    }
+  }
+
+  /**
+   * Extend audio with beat-aware crossfaded looping.
+   * Instead of a hard loop boundary, finds the best loop point
+   * and applies a crossfade for seamless looping.
+   */
+  async extendAudioWithCrossfade(
+    inputPath: string,
+    targetDuration: number,
+    outputPath: string,
+    opts?: {
+      /** Bar duration for bar-aligned loop points */
+      barDuration?: number;
+      /** Crossfade duration at loop point (default 0.5s) */
+      crossfadeDuration?: number;
+    }
+  ): Promise<string> {
+    const { barDuration, crossfadeDuration = 0.5 } = opts || {};
+
+    const currentDuration = await this.getAudioDuration(inputPath);
+    if (currentDuration >= targetDuration) {
+      return this.trimAudio(inputPath, targetDuration, outputPath);
+    }
+
+    try {
+      // Find best loop point
+      const loopPoints = await this.findLoopPoints(inputPath, {
+        barDuration,
+        minLoopLength: Math.max(4, currentDuration * 0.3),
+      });
+      const loopPoint = loopPoints[0]?.timestamp ?? currentDuration / 2;
+
+      logger.info(`Beat-aware extend: loop at ${loopPoint.toFixed(2)}s, crossfade ${crossfadeDuration}s`);
+
+      // Strategy: use the segment from start to loopPoint as the loop body.
+      // Each repetition crossfades with the previous iteration at the loop boundary.
+      const loopBodyDuration = loopPoint;
+      const loopsNeeded = Math.ceil((targetDuration - currentDuration) / loopBodyDuration) + 1;
+
+      return new Promise((resolve, reject) => {
+        try {
+          const command = ffmpeg();
+          const SAMPLE_RATE = 44100;
+          const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
+
+          // Input 0: full original track
+          command.input(inputPath);
+
+          // Input 1..N: copies for looping (each uses the loop body segment)
+          for (let i = 0; i < loopsNeeded; i++) {
+            command.input(inputPath);
+          }
+
+          const filters: string[] = [];
+          const concatLabels: string[] = [];
+
+          // First: play the full original track
+          filters.push(`[0:a]${norm}[orig]`);
+          concatLabels.push('[orig]');
+
+          // For each additional loop iteration: extract the loop body with crossfade tails
+          for (let i = 0; i < loopsNeeded; i++) {
+            const inputIdx = i + 1;
+            const label = `loop${i}`;
+            const xfade = Math.min(crossfadeDuration, loopBodyDuration * 0.2);
+
+            // Extract loop body: from 0 to loopPoint, with fade-in at the start
+            filters.push(
+              `[${inputIdx}:a]${norm},atrim=0:${loopPoint},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${xfade}:curve=tri,afade=t=out:st=${loopPoint - xfade}:d=${xfade}:curve=tri[${label}]`
+            );
+            concatLabels.push(`[${label}]`);
+          }
+
+          // Concatenate all segments
+          filters.push(`${concatLabels.join('')}concat=n=${concatLabels.length}:v=0:a=1[joined]`);
+
+          // Trim to exact target duration
+          filters.push(`[joined]atrim=0:${targetDuration},asetpts=PTS-STARTPTS[out]`);
+
+          const filterStr = filters.join(';');
+          command.outputOptions(['-filter_complex', filterStr, '-map', '[out]']);
+          this.setOutputOptions(command, 'mp3');
+          command.output(outputPath);
+
+          command
+            .on('end', () => {
+              logger.info(`Beat-aware extend completed: ${targetDuration}s`, { outputPath });
+              resolve(outputPath);
+            })
+            .on('error', (err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              logger.warn(`Beat-aware extend failed, falling back to simple loop: ${msg}`);
+              // Fallback to simple loop
+              this.extendAudioDuration(inputPath, targetDuration, outputPath)
+                .then(resolve)
+                .catch(reject);
+            });
+
+          command.run();
+        } catch (error: any) {
+          // Fallback to simple loop
+          this.extendAudioDuration(inputPath, targetDuration, outputPath)
+            .then(resolve)
+            .catch(reject);
+        }
+      });
+    } catch (err: any) {
+      logger.warn(`Beat-aware extend setup failed, falling back to simple loop: ${err.message}`);
+      return this.extendAudioDuration(inputPath, targetDuration, outputPath);
     }
   }
 
