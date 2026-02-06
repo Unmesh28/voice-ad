@@ -1017,27 +1017,27 @@ class FFmpegService {
     voicePath: string,
     outputPath: string,
     opts?: {
-      /** Compressor threshold in dB (default -25) */
+      /** Compressor threshold in dB (default -20) — more aggressive for cleaner voice */
       threshold?: number;
-      /** Compression ratio (default 6) */
+      /** Compression ratio (default 8) — higher ratio for sharper ducking */
       ratio?: number;
-      /** Attack in ms (default 5) */
+      /** Attack in ms (default 3) — fast grab when voice starts */
       attack?: number;
-      /** Release in ms (default 150) */
+      /** Release in ms (default 250) — longer release for smoother recovery */
       release?: number;
-      /** Crossover low→mid frequency in Hz (default 500) */
+      /** Crossover low→mid frequency in Hz (default 400) */
       crossoverLow?: number;
-      /** Crossover mid→high frequency in Hz (default 4000) */
+      /** Crossover mid→high frequency in Hz (default 5000) */
       crossoverHigh?: number;
     }
   ): Promise<string> {
     const {
-      threshold = -25,
-      ratio = 6,
-      attack = 5,
-      release = 150,
-      crossoverLow = 500,
-      crossoverHigh = 4000,
+      threshold = -20,
+      ratio = 8,
+      attack = 3,
+      release = 250,
+      crossoverLow = 400,
+      crossoverHigh = 5000,
     } = opts || {};
 
     // Try multiband first, fall back to full-signal sidechain
@@ -1056,7 +1056,19 @@ class FFmpegService {
   }
 
   /**
-   * Multiband sidechain: split music into 3 bands, compress only the mid band.
+   * 5-band multiband sidechain: split music into 5 frequency bands,
+   * sidechain compress the 3 middle bands (voice range) with different ratios.
+   *
+   * Band layout:
+   *   1. Sub-bass  (<150 Hz)  — untouched, keeps the low-end foundation
+   *   2. Low-mid   (150–500 Hz) — light compression, voice chest resonance
+   *   3. Mid       (500–2kHz)  — heavy compression, voice fundamental/formants
+   *   4. Upper-mid (2k–5kHz)   — heavy compression, voice presence/clarity
+   *   5. Air       (>5kHz)     — untouched, keeps shimmer and sparkle
+   *
+   * This 5-band approach is what professional broadcast engineers use:
+   * surgical ducking in the voice range while preserving musical fullness
+   * in the bass and treble.
    */
   private applySidechainDuckingMultiband(
     musicPath: string,
@@ -1066,10 +1078,17 @@ class FFmpegService {
   ): Promise<string> {
     const { threshold, ratio, attack, release, crossoverLow, crossoverHigh } = opts;
 
+    // 5-band crossover points
+    const xSub = 150;              // Sub-bass cutoff
+    const xLowMid = crossoverLow;  // Low-mid to mid (~400Hz)
+    const xMidHigh = 2000;         // Mid to upper-mid
+    const xAir = crossoverHigh;    // Upper-mid to air (~5000Hz)
+
     return new Promise((resolve, reject) => {
       try {
-        logger.info('Applying multiband sidechain ducking', {
-          threshold, ratio, attack, release, crossoverLow, crossoverHigh,
+        logger.info('Applying 5-band multiband sidechain ducking', {
+          threshold, ratio, attack, release,
+          bands: `<${xSub}|${xSub}-${xLowMid}|${xLowMid}-${xMidHigh}|${xMidHigh}-${xAir}|>${xAir}`,
         });
 
         const command = ffmpeg();
@@ -1079,33 +1098,40 @@ class FFmpegService {
         const SAMPLE_RATE = 44100;
         const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
-        // Filter graph:
-        // 1. Normalize both inputs
-        // 2. Split music into 3 frequency bands
-        // 3. Sidechain compress mid band only using voice
-        // 4. Boost each band by 3x to compensate for amix ÷3 normalization
-        // 5. Recombine all bands
+        // Light compression for low-mid (voice chest resonance — duck gently)
+        const lightRatio = Math.max(2, Math.round(ratio * 0.5));
+        const lightThreshold = threshold - 5; // less sensitive
+
         const filters = [
           `[0:a]${norm}[music]`,
           `[1:a]${norm}[voice]`,
 
-          // Split music into 3 bands
-          `[music]asplit=3[m1][m2][m3]`,
+          // Split voice for multiple sidechain inputs
+          `[voice]asplit=3[vsc1][vsc2][vsc3]`,
 
-          // Low band: everything below crossoverLow
-          `[m1]lowpass=f=${crossoverLow}:poles=2,volume=3.0[low]`,
+          // Split music into 5 bands
+          `[music]asplit=5[m1][m2][m3][m4][m5]`,
 
-          // Mid band: between crossoverLow and crossoverHigh
-          `[m2]highpass=f=${crossoverLow}:poles=2,lowpass=f=${crossoverHigh}:poles=2[mid_raw]`,
+          // Band 1: Sub-bass (<150Hz) — untouched
+          `[m1]lowpass=f=${xSub}:poles=2,volume=5.0[sub]`,
 
-          // High band: everything above crossoverHigh
-          `[m3]highpass=f=${crossoverHigh}:poles=2,volume=3.0[high]`,
+          // Band 2: Low-mid (150–400Hz) — light sidechain compression
+          `[m2]highpass=f=${xSub}:poles=2,lowpass=f=${xLowMid}:poles=2[lm_raw]`,
+          `[lm_raw][vsc1]sidechaincompress=threshold=${lightThreshold}dB:ratio=${lightRatio}:attack=${attack + 2}:release=${release}:level_sc=1:mix=0.5,volume=5.0[lowmid]`,
 
-          // Sidechain compress mid band — voice triggers compression
-          `[mid_raw][voice]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release}:level_sc=1:mix=0.7,volume=3.0[mid]`,
+          // Band 3: Mid (400–2kHz) — heavy sidechain compression (voice fundamental)
+          `[m3]highpass=f=${xLowMid}:poles=2,lowpass=f=${xMidHigh}:poles=2[mid_raw]`,
+          `[mid_raw][vsc2]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release}:level_sc=1:mix=0.8,volume=5.0[mid]`,
 
-          // Recombine all bands (amix divides by 3, so the 3x volume above compensates)
-          `[low][mid][high]amix=inputs=3:duration=longest:dropout_transition=0[out]`,
+          // Band 4: Upper-mid (2k–5kHz) — heavy sidechain compression (voice presence)
+          `[m4]highpass=f=${xMidHigh}:poles=2,lowpass=f=${xAir}:poles=2[um_raw]`,
+          `[um_raw][vsc3]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release + 50}:level_sc=1:mix=0.75,volume=5.0[upmid]`,
+
+          // Band 5: Air (>5kHz) — untouched
+          `[m5]highpass=f=${xAir}:poles=2,volume=5.0[air]`,
+
+          // Recombine all 5 bands (amix divides by 5, so the 5x volume above compensates)
+          `[sub][lowmid][mid][upmid][air]amix=inputs=5:duration=longest:dropout_transition=0[out]`,
         ];
 
         const filterStr = filters.join(';');
@@ -1115,16 +1141,16 @@ class FFmpegService {
 
         command
           .on('start', (commandLine: string) => {
-            logger.debug('Multiband sidechain FFmpeg:', commandLine.slice(0, 500));
+            logger.debug('5-band sidechain FFmpeg:', commandLine.slice(0, 500));
           })
           .on('end', () => {
-            logger.info('Multiband sidechain ducking applied:', outputPath);
+            logger.info('5-band sidechain ducking applied:', outputPath);
             resolve(outputPath);
           })
           .on('error', (err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
-            logger.error('Multiband sidechain FFmpeg error:', msg);
-            reject(new Error(`Multiband sidechain ducking failed: ${msg}`));
+            logger.error('5-band sidechain FFmpeg error:', msg);
+            reject(new Error(`5-band sidechain ducking failed: ${msg}`));
           });
 
         command.run();
@@ -1260,10 +1286,20 @@ class FFmpegService {
 
   /**
    * Apply voice-supportive EQ to a music track.
-   * Carves frequency space for voice intelligibility:
-   *   - High-pass at 30Hz (remove sub-bass rumble)
-   *   - Notch at 3kHz (-4dB, Q=1.0) — carve the voice presence band
-   *   - Shelf lift at 8kHz (+2dB) — add air/brightness above voice range
+   * Multi-band surgical carving for professional voice-over intelligibility:
+   *
+   *   1. High-pass at 80Hz — remove sub-bass that competes with voice chest tones
+   *   2. Low-mid cut at 250Hz (-2.5dB, Q=0.8) — reduce muddiness in voice fundamental range
+   *   3. Lower presence cut at 800Hz (-2dB, Q=0.7) — thin out low voice formant overlap
+   *   4. Voice clarity carve at 1.5kHz (-3dB, Q=0.8) — carve F2 formant region
+   *   5. Deep presence carve at 3kHz (-5dB, Q=0.7) — deep cut in voice presence band (F3)
+   *   6. Upper presence taper at 5kHz (-2dB, Q=1.0) — smooth rolloff above voice
+   *   7. Air shelf boost at 8kHz (+2.5dB) — add shimmer/sparkle above voice range
+   *   8. Ultra-high sparkle at 12kHz (+1.5dB) — breathiness and space
+   *
+   * This mimics what a professional mix engineer does: carve a wide "valley"
+   * in the 200Hz–5kHz range (where voice lives) while boosting frequencies
+   * above and below that range to maintain perceived fullness.
    */
   async applyVoiceSupportEQ(
     inputPath: string,
@@ -1271,13 +1307,18 @@ class FFmpegService {
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       try {
-        logger.info('Applying voice-support EQ to music track');
+        logger.info('Applying voice-support EQ to music track (multi-band surgical)');
         const command = ffmpeg(inputPath);
 
         const eqFilter = [
-          'highpass=f=30:poles=2',
-          'equalizer=f=3000:t=q:w=1.0:g=-4',
-          'equalizer=f=8000:t=h:g=2',
+          'highpass=f=80:poles=2',
+          'equalizer=f=250:t=q:w=0.8:g=-2.5',
+          'equalizer=f=800:t=q:w=0.7:g=-2',
+          'equalizer=f=1500:t=q:w=0.8:g=-3',
+          'equalizer=f=3000:t=q:w=0.7:g=-5',
+          'equalizer=f=5000:t=q:w=1.0:g=-2',
+          'equalizer=f=8000:t=h:g=2.5',
+          'equalizer=f=12000:t=h:g=1.5',
         ].join(',');
 
         command
@@ -1290,13 +1331,66 @@ class FFmpegService {
 
         command
           .on('end', () => {
-            logger.info('Voice-support EQ applied:', outputPath);
+            logger.info('Voice-support EQ applied (multi-band):', outputPath);
             resolve(outputPath);
           })
           .on('error', (err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
             logger.error('FFmpeg voice-support EQ error:', msg);
             reject(new Error(`Failed to apply voice-support EQ: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Apply presence EQ to voice track for enhanced clarity in the mix.
+   * Boosts voice intelligibility frequencies and removes problematic ranges:
+   *
+   *   1. High-pass at 80Hz — remove proximity effect / room rumble
+   *   2. Low-mid cut at 150Hz (-2dB) — reduce boominess from close-mic recording
+   *   3. Presence boost at 2.5kHz (+2dB) — enhance articulation and clarity
+   *   4. Air boost at 7kHz (+1.5dB) — add breathiness and "open" quality
+   *   5. De-ess region at 6kHz (-1dB) — gently tame sibilance
+   */
+  async applyVoicePresenceEQ(
+    inputPath: string,
+    outputPath: string
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info('Applying voice presence EQ');
+        const command = ffmpeg(inputPath);
+
+        const eqFilter = [
+          'highpass=f=80:poles=2',
+          'equalizer=f=150:t=q:w=1.0:g=-2',
+          'equalizer=f=2500:t=q:w=0.8:g=2',
+          'equalizer=f=6000:t=q:w=1.2:g=-1',
+          'equalizer=f=7000:t=h:g=1.5',
+        ].join(',');
+
+        command
+          .audioFilters(eqFilter)
+          .audioCodec('libmp3lame')
+          .audioBitrate('192k')
+          .audioChannels(2)
+          .audioFrequency(44100)
+          .output(outputPath);
+
+        command
+          .on('end', () => {
+            logger.info('Voice presence EQ applied:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('FFmpeg voice presence EQ error:', msg);
+            reject(new Error(`Failed to apply voice presence EQ: ${msg}`));
           });
 
         command.run();
@@ -1513,6 +1607,76 @@ class FFmpegService {
     } catch (err: any) {
       logger.warn(`Beat-aware extend setup failed, falling back to simple loop: ${err.message}`);
       return this.extendAudioDuration(inputPath, targetDuration, outputPath);
+    }
+  }
+
+  /**
+   * Measure the spectral centroid and frequency balance of an audio file.
+   * Used by quality scoring to assess whether music has appropriate
+   * frequency distribution (not too bass-heavy, not too thin).
+   *
+   * Returns:
+   *   - spectralCentroid: weighted average frequency (Hz). Good music: 1000–4000 Hz.
+   *   - lowEnergyRatio: fraction of energy below 300Hz (bass heaviness)
+   *   - highEnergyRatio: fraction of energy above 8kHz (brightness)
+   */
+  async measureSpectralBalance(filePath: string): Promise<{
+    spectralCentroid: number;
+    lowEnergyRatio: number;
+    highEnergyRatio: number;
+  }> {
+    try {
+      // Use FFmpeg's astats with per-channel RMS to approximate spectral balance
+      // We measure RMS of filtered bands: low (<300Hz), mid (300–8kHz), high (>8kHz)
+      const [lowResult, midResult, highResult] = await Promise.all([
+        execAsync(
+          `ffmpeg -i "${filePath}" -af "lowpass=f=300,astats=metadata=1:reset=0" -f null - 2>&1`,
+          { maxBuffer: 5 * 1024 * 1024, timeout: 20000 }
+        ),
+        execAsync(
+          `ffmpeg -i "${filePath}" -af "highpass=f=300,lowpass=f=8000,astats=metadata=1:reset=0" -f null - 2>&1`,
+          { maxBuffer: 5 * 1024 * 1024, timeout: 20000 }
+        ),
+        execAsync(
+          `ffmpeg -i "${filePath}" -af "highpass=f=8000,astats=metadata=1:reset=0" -f null - 2>&1`,
+          { maxBuffer: 5 * 1024 * 1024, timeout: 20000 }
+        ),
+      ]);
+
+      const parseRMS = (stderr: string): number => {
+        const match = /RMS level dB:\s*(-?[\d.]+)/i.exec(stderr);
+        return match ? parseFloat(match[1]) : -60;
+      };
+
+      const lowRMS = parseRMS(lowResult.stderr);
+      const midRMS = parseRMS(midResult.stderr);
+      const highRMS = parseRMS(highResult.stderr);
+
+      // Convert dB to linear power for ratio calculation
+      const toLinear = (db: number) => Math.pow(10, db / 10);
+      const lowPower = toLinear(lowRMS);
+      const midPower = toLinear(midRMS);
+      const highPower = toLinear(highRMS);
+      const totalPower = lowPower + midPower + highPower;
+
+      const lowEnergyRatio = totalPower > 0 ? lowPower / totalPower : 0.33;
+      const highEnergyRatio = totalPower > 0 ? highPower / totalPower : 0.33;
+
+      // Approximate spectral centroid from band energies
+      const spectralCentroid = totalPower > 0
+        ? (lowPower * 150 + midPower * 2000 + highPower * 12000) / totalPower
+        : 2000;
+
+      logger.info('Spectral balance measured', {
+        spectralCentroid: Math.round(spectralCentroid),
+        lowEnergyRatio: Math.round(lowEnergyRatio * 100) / 100,
+        highEnergyRatio: Math.round(highEnergyRatio * 100) / 100,
+      });
+
+      return { spectralCentroid, lowEnergyRatio, highEnergyRatio };
+    } catch (err: any) {
+      logger.warn(`Spectral balance measurement failed: ${err.message}`);
+      return { spectralCentroid: 2000, lowEnergyRatio: 0.3, highEnergyRatio: 0.1 };
     }
   }
 

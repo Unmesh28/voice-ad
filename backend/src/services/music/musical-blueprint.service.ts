@@ -559,11 +559,11 @@ function buildBarBasedPrompt(input: BarPromptInput): string {
   const culturalFragment = culturalTemplate ? ` ${culturalTemplate.promptFragment}` : '';
   parts.push(`Genre: ${genre}. ${chords}. Consistent melodic motif throughout.${culturalFragment} Instrumental only, no vocals.`);
 
-  // Instrumentation summary
+  // Instrumentation with frequency register constraints
   if (instrumentation) {
-    parts.push(`Instrumentation: drums: ${instrumentation.drums}. bass: ${instrumentation.bass}. mids: ${instrumentation.mids}. fx: ${instrumentation.effects}. Leave 1-4kHz clear for voice.`);
+    parts.push(`Instrumentation: drums: ${instrumentation.drums} (kick sub-heavy). bass: ${instrumentation.bass} (below 200Hz). mids: ${instrumentation.mids} (sparse in 200Hz-5kHz). fx: ${instrumentation.effects} (above 5kHz for air). Keep 200Hz-5kHz sparse for voice.`);
   } else {
-    parts.push('Leave 1-4kHz frequency range clear for voice-over.');
+    parts.push('Arrange below 200Hz (bass, kick) and above 5kHz (cymbals, pads, air). Keep 200Hz-5kHz sparse for voice-over.');
   }
 
   // Section-by-section bar directions
@@ -602,7 +602,7 @@ function buildBarBasedPrompt(input: BarPromptInput): string {
   }
 
   // Critical instructions
-  parts.push('IMPORTANT: Continuous flowing music. Smooth transitions between sections. Professional ad background that supports voice.');
+  parts.push('IMPORTANT: Continuous flowing music. Smooth transitions between sections. Professional broadcast-quality ad background. Keep 200Hz-5kHz sparse for voice. Instrumental only, no vocals.');
 
   // Join and cap at Suno's 1000-char style limit
   return parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 1000);

@@ -184,11 +184,17 @@ export function buildSunoPromptFromScriptAnalysis(
   const timeSigNote = timeSig !== '4/4' ? ` Time signature: ${timeSig}.` : '';
   sections.push(`genre: ${genre}. targetBPM: ${baseBPM}. mood: ${mood}. Key: ${key}. ${chords}.${timeSigNote} Maintain consistent melodic motif throughout.`);
 
-  // 2) Instrumentation (drums, bass, mids, effects) - leave 1-4kHz clear for voice
+  // 2) Instrumentation with frequency register constraints
+  //    Professional voice-over music must avoid the 200Hz-5kHz voice range.
+  //    Instruments should sit below 200Hz (bass/sub) or above 5kHz (air/shimmer).
   if (music.instrumentation) {
     const inst = music.instrumentation;
     sections.push(
-      `Instrumentation (voice-supportive, leaves 1-4kHz clear): drums: ${inst.drums}. bass: ${inst.bass}. mids: ${inst.mids}. effects: ${inst.effects}.`
+      `Instrumentation (voice-supportive arrangement): drums: ${inst.drums} (kick sub-heavy, hats bright). bass: ${inst.bass} (stay below 200Hz). mids: ${inst.mids} (minimal in 200Hz-5kHz voice range). effects: ${inst.effects} (above 5kHz for air/shimmer). CRITICAL: Keep 200Hz-5kHz sparse — voice occupies this range.`
+    );
+  } else {
+    sections.push(
+      'Arrangement note: Keep instrumentation below 200Hz (bass, kick) and above 5kHz (cymbals, air, pads) to leave 200Hz-5kHz clear for voice-over.'
     );
   }
 
@@ -297,8 +303,8 @@ export function buildSunoPromptFromScriptAnalysis(
     sections.push(`ButtonEnding: ${music.buttonEnding.type}${timing}${desc}. CLEAN ENDING, NO FADE-OUT.`);
   }
 
-  // Critical instructions for continuity and flow
-  sections.push('IMPORTANT: Continuous flowing music, no abrupt breaks or stops. Music must adapt to speech pacing and natural pauses. Smooth tempo transitions between sections. Instrumental only, no vocals. Professional ad background that supports voice without competing.');
+  // Critical instructions for continuity, flow, and voice-support
+  sections.push('IMPORTANT: Continuous flowing music, no abrupt breaks or stops. Music must adapt to speech pacing and natural pauses. Smooth tempo transitions between sections. Instrumental only, no vocals, no spoken words. Professional broadcast-quality ad background. Keep mid-frequency range (200Hz-5kHz) sparse and simple — voice occupies this range. Bass and percussion below 200Hz, shimmer and effects above 5kHz.');
 
   // Priority-based truncation: sections are ordered by priority (index 0 = highest).
   // When total exceeds SUNO_STYLE_MAX, drop from the end (lowest priority first).
