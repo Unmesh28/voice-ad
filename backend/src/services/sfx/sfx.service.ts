@@ -240,9 +240,10 @@ class SfxService {
       .filter((seg) => seg.sfx?.description)
       .map((seg) => ({
         description: seg.sfx!.description,
-        // sfx_hit segments: use the full segment duration for the SFX
-        // Other segment types: SFX is an overlay, cap at 2s
-        durationSeconds: seg.type === 'sfx_hit' ? seg.duration : Math.min(seg.duration, 2),
+        // sfx_hit segments: use the full segment duration
+        // Other segment types: SFX is an overlay — cap at 1s to avoid
+        // clashing with voiceover (was 2s, which was too long)
+        durationSeconds: seg.type === 'sfx_hit' ? seg.duration : Math.min(seg.duration, 1.0),
         segmentIndex: seg.segmentIndex,
         segmentLabel: seg.label,
       }));

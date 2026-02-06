@@ -316,11 +316,20 @@ class TimelineComposerService {
       // --- SFX ---
       const sfxResult = sfxResults.get(seg.segmentIndex);
       if (sfxResult && sfxResult.filePath) {
+        // For sfx_hit segments: SFX is the main audio, full volume at segment start.
+        // For other segments (voiceover + SFX overlay): lower volume and offset
+        // slightly so the SFX doesn't clash with voice entry.
+        const isSfxHit = seg.type === 'sfx_hit';
+        const sfxVolume = isSfxHit
+          ? (seg.sfx?.volume ?? 0.7)
+          : Math.min(seg.sfx?.volume ?? 0.4, 0.45); // Overlay SFX stays subtle
+        const sfxOffset = isSfxHit ? 0 : 0.1; // Slight delay for overlays
+
         timeline.push({
           type: 'sfx',
           filePath: sfxResult.filePath,
-          startTime: segStart,
-          volume: seg.sfx?.volume ?? 0.8,
+          startTime: segStart + sfxOffset,
+          volume: sfxVolume,
           duration: sfxResult.duration,
           segmentIndex: seg.segmentIndex,
           label: seg.label,
