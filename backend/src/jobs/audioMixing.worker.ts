@@ -13,6 +13,7 @@ import { logger } from '../config/logger';
 import redisConnection from '../config/redis';
 import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
+import { alignMusicToVoice } from '../utils/musical-timing';
 
 interface AudioMixingJobData {
   userId: string;
@@ -114,32 +115,50 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
 
     await job.updateProgress(30);
 
-    // Align music timeline to voice: stretch or extend so music is exactly voiceDuration (beats and speech match).
+    // ========== BAR-ALIGNED MUSIC ALIGNMENT ==========
+    // Instead of stretching music with atempo (which destroys musical structure),
+    // we trim or loop on bar boundaries to preserve bars, beats, and phrasing.
     let finalMusicPath = musicPath;
+    const targetBPM: number = settings.targetBPM ?? 100;
+    const genre: string = settings.genre ?? '';
+
     if (voicePath && musicPath) {
       const voiceDuration = await ffmpegService.getAudioDuration(voicePath);
       const musicDuration = await ffmpegService.getAudioDuration(musicPath);
 
-      logger.info(`Aligning music to voice: voice ${voiceDuration}s, music ${musicDuration}s`);
+      const alignment = alignMusicToVoice(musicDuration, voiceDuration, targetBPM, { genre });
 
-      if (musicDuration > voiceDuration) {
-        // Time-stretch music down to voice duration so timelines match (no hard cut; music fits the speech).
-        const stretchedFilename = `stretched_music_${uuidv4()}.mp3`;
-        const stretchedMusicPath = path.join(uploadDir, 'music', stretchedFilename);
-        logger.info(`Stretching music from ${musicDuration}s to ${voiceDuration}s for beat/speech alignment`);
-        await ffmpegService.stretchAudioToDuration(musicPath, voiceDuration, stretchedMusicPath);
-        finalMusicPath = stretchedMusicPath;
+      logger.info(`Bar-aligned music alignment: voice=${voiceDuration.toFixed(1)}s, music=${musicDuration.toFixed(1)}s`, {
+        action: alignment.action,
+        targetDuration: alignment.targetDuration.toFixed(1),
+        targetBars: alignment.targetBars,
+        barDuration: alignment.barDuration.toFixed(2),
+        bpm: targetBPM,
+        preRollBars: alignment.preRollBars,
+        preRollDuration: alignment.preRollDuration.toFixed(2),
+      });
+
+      const musicDir = path.join(uploadDir, 'music');
+      if (!fs.existsSync(musicDir)) fs.mkdirSync(musicDir, { recursive: true });
+
+      if (alignment.action === 'trim') {
+        // Trim on a bar boundary (preserves musical structure, no tempo change)
+        const trimmedFilename = `trimmed_music_${uuidv4()}.mp3`;
+        const trimmedMusicPath = path.join(musicDir, trimmedFilename);
+        logger.info(`Trimming music from ${musicDuration.toFixed(1)}s to ${alignment.targetDuration.toFixed(1)}s (${alignment.targetBars} bars at ${targetBPM} BPM)`);
+        await ffmpegService.trimAudio(musicPath, alignment.targetDuration, trimmedMusicPath);
+        finalMusicPath = trimmedMusicPath;
         await job.updateProgress(50);
-      } else if (musicDuration < voiceDuration) {
-        // Extend music by looping to match voice duration.
-        const extendedFilename = `extended_music_${uuidv4()}.mp3`;
-        const extendedMusicPath = path.join(uploadDir, 'music', extendedFilename);
-        logger.info(`Extending music from ${musicDuration}s to ${voiceDuration}s`);
-        await ffmpegService.extendAudioDuration(musicPath, voiceDuration, extendedMusicPath);
-        finalMusicPath = extendedMusicPath;
+      } else if (alignment.action === 'loop') {
+        // Loop on bar boundaries (seamless because loop point = bar boundary)
+        const loopedFilename = `looped_music_${uuidv4()}.mp3`;
+        const loopedMusicPath = path.join(musicDir, loopedFilename);
+        logger.info(`Looping music from ${musicDuration.toFixed(1)}s to ${alignment.targetDuration.toFixed(1)}s (${alignment.loopCount} loops, ${alignment.targetBars} bars)`);
+        await ffmpegService.extendAudioDuration(musicPath, alignment.targetDuration, loopedMusicPath);
+        finalMusicPath = loopedMusicPath;
         await job.updateProgress(50);
       }
-      // else same duration: use as-is
+      // 'use_as_is': music duration is already close enough to target
     }
 
     // Per-sentence music volume: when script has sentenceCues + lastTTS.sentenceTimings, apply volume curve to music

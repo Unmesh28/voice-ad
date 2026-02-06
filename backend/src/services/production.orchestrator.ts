@@ -15,7 +15,6 @@ import { QueueEvents } from 'bullmq';
 import redisConnection from '../config/redis';
 import { logger, ttmPromptLogger } from '../config/logger';
 import voiceSelectorService from './voice-selector.service';
-import musicDirectorService from './music/music-director.service';
 import { buildSunoPromptFromScriptAnalysis } from './music/suno-prompt-builder';
 import mongoose from 'mongoose';
 
@@ -188,81 +187,25 @@ export class ProductionOrchestrator {
       const scriptForMusic = scriptAfterTts ?? script;
       const scriptMetadata = (scriptForMusic as any)?.metadata as any;
 
-      // ========== MUSIC DIRECTOR AI INTEGRATION ==========
-      // Generate professional music direction using the Music Director Service
-      logger.info(`[Pipeline ${productionId}] Generating professional music direction...`);
-
-      let musicDirection: any = null;
-      try {
-        // Determine product category from prompt or metadata
-        const productCategory = scriptMetadata?.context?.adCategory ||
-          scriptMetadata?.adProductionJson?.context?.adCategory ||
-          'general';
-
-        // Determine target audience
-        const targetAudience = scriptMetadata?.context?.targetAudience || 'general audience';
-
-        // Determine platform (default to podcast for now, can be made configurable)
-        const platform = 'podcast';
-
-        musicDirection = await musicDirectorService.generateMusicDirection({
-          script: scriptForMusic.content,
-          duration_seconds: duration,
-          product_category: productCategory,
-          brand_tone: tone,
-          target_audience: targetAudience,
-          platform: platform as any,
-          userPrompt: prompt,
-        });
-
-        logger.info(`[Pipeline ${productionId}] Music direction generated:`, {
-          category: musicDirection.pre_analysis.music_category,
-          energyCurve: musicDirection.pre_analysis.overall_energy_curve,
-          segments: musicDirection.segments.length,
-          strategy: musicDirection.generation_strategy.recommended_approach,
-        });
-
-        // Log the music direction for debugging
-        logger.info(`[Pipeline ${productionId}] Music direction details:`, {
-          globalDirection: musicDirection.global_music_direction,
-          buttonEnding: musicDirection.button_ending_specification,
-          mixingInstructions: musicDirection.mixing_instructions,
-        });
-
-      } catch (error: any) {
-        logger.warn(`[Pipeline ${productionId}] Music Director Service failed, falling back to basic music generation:`, error.message);
-      }
-      // ========== END MUSIC DIRECTOR AI INTEGRATION ==========
-
+      // ========== MUSIC DIRECTION (single source: LLM metadata) ==========
+      // The LLM already produced music direction during script generation.
+      // We use that directly -- no separate Music Director service to avoid
+      // conflicting direction from two systems.
       let musicPrompt = `${tone} background music for advertisement`;
       let musicGenre = 'corporate';
       let musicMood = tone;
       let targetBPM: number | undefined;
 
-      // Use Music Director output if available, otherwise fall back to existing logic
-      if (musicDirection) {
-        // Use the full track prompt from Music Director
-        musicPrompt = musicDirection.full_track_prompt;
-        musicGenre = musicDirection.global_music_direction.genre;
-        musicMood = musicDirection.global_music_direction.overall_mood.join(' ');
-        targetBPM = musicDirection.global_music_direction.base_tempo_bpm;
-
-        logger.info(`[Pipeline ${productionId}] Using Music Director prompt: ${musicPrompt.slice(0, 100)}...`);
-
-        // Log full prompt to TTM logger
-        ttmPromptLogger.info(musicPrompt, {
-          pipelineId: productionId,
-          provider: 'music-director',
-          mode: musicDirection.generation_strategy.recommended_approach,
-          energyCurve: musicDirection.pre_analysis.overall_energy_curve,
-        });
-
-      } else if (scriptMetadata?.music?.prompt) {
+      if (scriptMetadata?.music?.prompt) {
         musicPrompt = scriptMetadata.music.prompt;
         if (scriptMetadata.music.genre) musicGenre = scriptMetadata.music.genre;
         if (scriptMetadata.music.mood) musicMood = scriptMetadata.music.mood;
         if (typeof scriptMetadata.music?.targetBPM === 'number') targetBPM = scriptMetadata.music.targetBPM;
-        logger.info(`[Pipeline ${productionId}] Using LLM music suggestion: ${musicPrompt.slice(0, 80)}...`);
+        logger.info(`[Pipeline ${productionId}] Using LLM music direction: ${musicPrompt.slice(0, 80)}...`, {
+          genre: musicGenre,
+          mood: musicMood,
+          targetBPM,
+        });
       } else {
         try {
           musicPrompt = await voiceSelectorService.generateMusicPrompt(scriptForMusic.content, duration);
@@ -272,7 +215,7 @@ export class ProductionOrchestrator {
         }
       }
 
-      // Build one full composition prompt for Suno from entire script analysis (context, music including composerDirection, fades, volume, mixPreset, sentenceCues)
+      // Build one full composition prompt for Suno from the LLM's script analysis
       let sunoPayload: { customMode?: boolean; title?: string; style?: string; prompt: string } | undefined;
       if (scriptMetadata?.music && typeof scriptMetadata.music === 'object') {
         const productionContext = scriptMetadata.productionContext || scriptMetadata.adProductionJson?.context;
@@ -296,6 +239,7 @@ export class ProductionOrchestrator {
             targetBPM: targetBPM ?? 100,
             genre: musicGenre,
             mood: musicMood,
+            // Arc data informs the prompt's compositional direction, but we always generate ONE track
             arc: scriptMetadata.music.arc,
             composerDirection: scriptMetadata.music.composerDirection,
           },
@@ -313,48 +257,26 @@ export class ProductionOrchestrator {
           style: sunoResult.style || undefined,
           prompt: sunoResult.prompt,
         };
-        if (sunoResult.customMode) {
-          logger.info(`[Pipeline ${productionId}] Suno composition from script analysis: ${sunoResult.style.slice(0, 120)}...`);
 
-          // Log FULL TTM prompt to dedicated log file (no truncation)
-          ttmPromptLogger.info(
-            sunoResult.style,
-            {
-              pipelineId: productionId,
-              provider: 'suno',
-              mode: 'custom',
-              title: sunoResult.title,
-            }
-          );
-        } else {
-          // Log non-custom mode prompt
-          ttmPromptLogger.info(
-            sunoResult.prompt,
-            {
-              pipelineId: productionId,
-              provider: 'suno',
-              mode: 'non-custom',
-            }
-          );
-        }
+        // Log TTM prompt
+        const logPrompt = sunoResult.customMode ? sunoResult.style : sunoResult.prompt;
+        logger.info(`[Pipeline ${productionId}] Suno composition prompt: ${logPrompt.slice(0, 120)}...`);
+        ttmPromptLogger.info(logPrompt, {
+          pipelineId: productionId,
+          provider: 'suno',
+          mode: sunoResult.customMode ? 'custom' : 'non-custom',
+          title: sunoResult.title || undefined,
+        });
       }
 
-      // Segment-based generation: Now uses smart overlapping + contextual prompting for seamless blending
-      // Enable when arc has 2+ segments for smooth, continuous music with natural transitions
-      const musicArc = scriptMetadata?.music?.arc;
-      const enableSegmentMode = Array.isArray(musicArc) && musicArc.length >= 2;
-
-      if (enableSegmentMode) {
-        logger.info(
-          `[Pipeline ${productionId}] Using segment-based generation with smart overlapping ` +
-          `for ${musicArc.length} arc segments (seamless transitions with contextual prompting)`
-        );
-      }
-
+      // SINGLE-TRACK GENERATION ONLY.
+      // Segment mode is disabled -- one continuous track produces better results
+      // than crossfading separate clips. The arc data stays in the prompt for
+      // Suno's compositional awareness, but we never split into segments.
       const musicJob = await musicGenerationQueue.add('generate-music', {
         userId,
         text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
-        duration_seconds: Math.min(duration, 22),
+        duration_seconds: duration, // Suno can handle full duration (up to 8 min)
         prompt_influence: 0.3,
         genre: musicGenre,
         mood: musicMood,
@@ -363,14 +285,8 @@ export class ProductionOrchestrator {
         sunoTitle: sunoPayload?.title,
         sunoStyle: sunoPayload?.style,
         sunoPrompt: sunoPayload?.prompt,
-        segmentBasedGeneration: enableSegmentMode,
-        arc: enableSegmentMode ? musicArc : undefined,
-        // crossfadeDuration will be calculated dynamically per segment pair
-        musicMetadata: enableSegmentMode ? {
-          instrumentation: scriptMetadata?.music?.instrumentation,
-          composerDirection: scriptMetadata?.music?.composerDirection,
-          buttonEnding: scriptMetadata?.music?.buttonEnding,
-        } : undefined,
+        // Segment mode disabled: always generate one continuous track
+        segmentBasedGeneration: false,
       });
       const musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
       if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
@@ -395,6 +311,9 @@ export class ProductionOrchestrator {
         loudnessPreset: 'crossPlatform',
         loudnessTargetLUFS: -16,
         loudnessTruePeak: -2,
+        // Pass BPM + genre so mixing worker can do bar-aligned trim/loop
+        targetBPM: targetBPM ?? 100,
+        genre: musicGenre,
       };
       if (scriptMetadata?.fades) {
         mixSettings.fadeIn = scriptMetadata.fades.fadeInSeconds ?? 0.1;
