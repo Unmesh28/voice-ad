@@ -21,7 +21,8 @@ import {
   type TimeSignature,
 } from '../../utils/musical-timing';
 import { logger } from '../../config/logger';
-import { inferKeyForGenre, inferChordProgression } from './suno-prompt-builder';
+import { inferKeyForGenre, inferChordProgression, inferTimeSignature } from './suno-prompt-builder';
+import { matchCulturalTemplate, getTimeSignatureForGenre } from './cultural-templates';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -260,7 +261,11 @@ export function generateMusicalBlueprint(input: BlueprintInput): MusicalBlueprin
     buttonEnding,
     musicalStructure,
   } = input;
-  const ts: TimeSignature = input.timeSignature || '4/4';
+  // Infer time signature from genre if not explicitly provided
+  // Check cultural template first (most specific), then suno-prompt-builder inference, then default 4/4
+  const culturalTs = getTimeSignatureForGenre(genre);
+  const inferredTs = inferTimeSignature(genre);
+  const ts: TimeSignature = input.timeSignature || (culturalTs !== '4/4' ? culturalTs : inferredTs) as TimeSignature || '4/4';
 
   // Phrase length from musicalStructure or default 4
   const phraseLen = musicalStructure?.phraseLength ?? 4;
@@ -549,8 +554,10 @@ function buildBarBasedPrompt(input: BarPromptInput): string {
   const bodyFeelPart = musicalStructure?.bodyFeel ? `, ${musicalStructure.bodyFeel} feel` : '';
   parts.push(`${finalBPM} BPM, ${ts} time, ${key}, ${mood}${bodyFeelPart}, ${totalBars} bars total (~${Math.round(totalDuration)}s).`);
 
-  // Genre/style + harmonic constraints
-  parts.push(`Genre: ${genre}. ${chords}. Consistent melodic motif throughout. Instrumental only, no vocals.`);
+  // Genre/style + harmonic constraints + cultural specifics
+  const culturalTemplate = matchCulturalTemplate(genre);
+  const culturalFragment = culturalTemplate ? ` ${culturalTemplate.promptFragment}` : '';
+  parts.push(`Genre: ${genre}. ${chords}. Consistent melodic motif throughout.${culturalFragment} Instrumental only, no vocals.`);
 
   // Instrumentation summary
   if (instrumentation) {

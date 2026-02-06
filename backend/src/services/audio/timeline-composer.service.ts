@@ -170,11 +170,17 @@ class TimelineComposerService {
     let preparedMusicPath = musicFilePath;
 
     if (musicDuration < totalDuration - 0.5) {
-      // Music too short — extend by looping
+      // Music too short — extend with beat-aware crossfaded looping
       const extendedPath = path.join(outputDir, `timeline_music_ext_${uuidv4().slice(0, 8)}.mp3`);
-      await ffmpegService.extendAudioDuration(musicFilePath, totalDuration, extendedPath);
+      // Estimate bar duration from first two music volume segments for loop alignment
+      const firstFullSeg = musicVolumeSegments.find((s) => s.behavior === 'full');
+      const estimatedBarDuration = firstFullSeg ? Math.min(2.0, firstFullSeg.endTime - firstFullSeg.startTime) : undefined;
+      await ffmpegService.extendAudioWithCrossfade(musicFilePath, totalDuration, extendedPath, {
+        barDuration: estimatedBarDuration,
+        crossfadeDuration: 0.5,
+      });
       preparedMusicPath = extendedPath;
-      logger.info(`Music extended from ${musicDuration.toFixed(1)}s to ${totalDuration.toFixed(1)}s`);
+      logger.info(`Music extended from ${musicDuration.toFixed(1)}s to ${totalDuration.toFixed(1)}s (beat-aware crossfade)`);
     } else if (musicDuration > totalDuration + 1) {
       // Music too long — simple trim from start
       const trimmedPath = path.join(outputDir, `timeline_music_trim_${uuidv4().slice(0, 8)}.mp3`);

@@ -6,6 +6,7 @@ import type {
   AdProductionSentenceCue,
   MixPreset,
 } from '../../types/ad-production';
+import { enrichPromptWithCulturalContext } from './cultural-templates';
 
 /**
  * Single TTM (text-to-music) prompt builder for Suno and ElevenLabs.
@@ -42,6 +43,17 @@ export interface AdContextForMusic {
 // ---------------------------------------------------------------------------
 // Harmonic defaults — genre-appropriate keys and chord progressions
 // ---------------------------------------------------------------------------
+
+/** Infer a time signature for a genre. Most ad music is 4/4,
+ *  but some cultural genres use compound meters (6/8, 3/4). */
+export function inferTimeSignature(genre: string): '4/4' | '3/4' | '6/8' | '7/8' | '12/8' {
+  const g = genre.toLowerCase();
+  if (/waltz|viennese/i.test(g)) return '3/4';
+  if (/celtic|irish|jig|scottish/i.test(g)) return '6/8';
+  if (/afrobeat|shuffle|blues.*shuffle|swing/i.test(g)) return '12/8';
+  if (/balkan|klezmer/i.test(g)) return '7/8';
+  return '4/4';
+}
 
 /** Infer a default key when the LLM doesn't provide one. */
 export function inferKeyForGenre(genre: string, mood: string): string {
@@ -165,10 +177,12 @@ export function buildSunoPromptFromScriptAnalysis(
 
   const sections: string[] = [];
 
-  // 1) Genre, BPM, mood, key, chords first (critical — never truncated)
+  // 1) Genre, BPM, mood, key, chords, time signature first (critical — never truncated)
   const key = (music as any).musicalStructure?.keySignature || inferKeyForGenre(genre, mood);
   const chords = inferChordProgression(genre, mood);
-  sections.push(`genre: ${genre}. targetBPM: ${baseBPM}. mood: ${mood}. Key: ${key}. ${chords}. Maintain consistent melodic motif throughout.`);
+  const timeSig = inferTimeSignature(genre);
+  const timeSigNote = timeSig !== '4/4' ? ` Time signature: ${timeSig}.` : '';
+  sections.push(`genre: ${genre}. targetBPM: ${baseBPM}. mood: ${mood}. Key: ${key}. ${chords}.${timeSigNote} Maintain consistent melodic motif throughout.`);
 
   // 2) Instrumentation (drums, bass, mids, effects) - leave 1-4kHz clear for voice
   if (music.instrumentation) {
@@ -190,10 +204,11 @@ export function buildSunoPromptFromScriptAnalysis(
     );
   }
 
-  // 5) Music prompt (overall description)
-  sections.push(
-    `Music prompt: ${(music.prompt || '').trim() || 'Instrumental ad background.'}`
-  );
+  // 5) Music prompt (overall description, enriched with cultural context)
+  const rawMusicPrompt = (music.prompt || '').trim() || 'Instrumental ad background.';
+  const culturalContext = (music as any).culturalStyle || (context as any)?.culturalContext || null;
+  const enrichedMusicPrompt = enrichPromptWithCulturalContext(rawMusicPrompt, genre, culturalContext);
+  sections.push(`Music prompt: ${enrichedMusicPrompt}`);
 
   // 6) Arc: every segment with startSeconds, endSeconds, label, musicPrompt, targetBPM, energyLevel
   // CRITICAL: Emphasize smooth transitions and continuous flow between sections

@@ -2,10 +2,12 @@ import ffmpeg from 'fluent-ffmpeg';
 import { logger } from '../../config/logger';
 import fs from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { AudioLayer, MultiLayerMixOptions, MasteringOptions } from '../../types/audio.types';
 
 const unlinkAsync = promisify(fs.unlink);
+const execAsync = promisify(exec);
 
 /** Fade curve: linear (tri), exp, qsin – maps to FFmpeg afade curve param */
 export type FadeCurveType = 'linear' | 'exp' | 'qsin';
@@ -1302,6 +1304,216 @@ class FFmpegService {
         reject(error);
       }
     });
+  }
+
+  /**
+   * Find candidate loop points in an audio file by analyzing energy levels.
+   * Returns timestamps where the audio energy is similar to the start,
+   * making them good candidates for seamless looping.
+   *
+   * When barDuration is provided, loop points are snapped to bar boundaries.
+   */
+  async findLoopPoints(
+    musicPath: string,
+    opts?: {
+      /** Duration of one bar in seconds (for bar-aligned loop points) */
+      barDuration?: number;
+      /** Minimum loop length in seconds (default 4) */
+      minLoopLength?: number;
+      /** Maximum number of candidates to return (default 5) */
+      maxCandidates?: number;
+    }
+  ): Promise<{ timestamp: number; energyDiff: number }[]> {
+    const { barDuration, minLoopLength = 4, maxCandidates = 5 } = opts || {};
+
+    try {
+      const duration = await this.getAudioDuration(musicPath);
+      if (duration < minLoopLength * 2) {
+        return [{ timestamp: duration / 2, energyDiff: 0 }];
+      }
+
+      // Measure RMS energy in small windows across the track
+      const { stderr } = await execAsync(
+        `ffmpeg -i "${musicPath}" -af "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-" -f null - 2>&1`,
+        { maxBuffer: 10 * 1024 * 1024, timeout: 30000 }
+      );
+
+      // Parse per-frame RMS levels
+      const rmsValues: number[] = [];
+      const rmsMatches = stderr.matchAll(/RMS_level=(-?[\d.]+)/g);
+      for (const m of rmsMatches) {
+        const val = parseFloat(m[1]);
+        if (isFinite(val) && val > -100) rmsValues.push(val);
+      }
+
+      if (rmsValues.length < 10) {
+        // Fallback: use midpoint or bar boundaries
+        if (barDuration && barDuration > 0) {
+          const midBar = Math.floor(duration / 2 / barDuration) * barDuration;
+          return [{ timestamp: Math.max(minLoopLength, midBar), energyDiff: 0 }];
+        }
+        return [{ timestamp: duration / 2, energyDiff: 0 }];
+      }
+
+      // Time per RMS sample
+      const timePerSample = duration / rmsValues.length;
+
+      // Get the energy of the start region (first ~2s)
+      const startSamples = Math.min(20, Math.ceil(2.0 / timePerSample));
+      const startEnergy = rmsValues.slice(0, startSamples).reduce((a, b) => a + b, 0) / startSamples;
+
+      // Find points where energy is similar to start (good loop points)
+      const candidates: { timestamp: number; energyDiff: number }[] = [];
+      const minSampleIdx = Math.ceil(minLoopLength / timePerSample);
+
+      for (let i = minSampleIdx; i < rmsValues.length - startSamples; i++) {
+        // Average energy in a window around this point
+        const windowSize = Math.min(startSamples, rmsValues.length - i);
+        const windowEnergy = rmsValues.slice(i, i + windowSize).reduce((a, b) => a + b, 0) / windowSize;
+        const energyDiff = Math.abs(windowEnergy - startEnergy);
+
+        let timestamp = i * timePerSample;
+
+        // Snap to bar boundary if barDuration is provided
+        if (barDuration && barDuration > 0) {
+          timestamp = Math.round(timestamp / barDuration) * barDuration;
+          // Skip if snapped to same point as previous candidate
+          if (candidates.length > 0 && Math.abs(candidates[candidates.length - 1].timestamp - timestamp) < barDuration * 0.5) {
+            continue;
+          }
+        }
+
+        // Ensure minimum loop length after snapping
+        if (timestamp < minLoopLength) continue;
+
+        candidates.push({ timestamp, energyDiff });
+      }
+
+      // Sort by energy similarity (lower diff = better loop point)
+      candidates.sort((a, b) => a.energyDiff - b.energyDiff);
+
+      const result = candidates.slice(0, maxCandidates);
+      logger.info(`Found ${result.length} loop point candidates`, {
+        best: result[0]?.timestamp.toFixed(2),
+        energyDiff: result[0]?.energyDiff.toFixed(2),
+      });
+
+      return result.length > 0 ? result : [{ timestamp: duration / 2, energyDiff: 0 }];
+    } catch (err: any) {
+      logger.warn(`Loop-point detection failed: ${err.message}`);
+      return [{ timestamp: minLoopLength, energyDiff: 0 }];
+    }
+  }
+
+  /**
+   * Extend audio with beat-aware crossfaded looping.
+   * Instead of a hard loop boundary, finds the best loop point
+   * and applies a crossfade for seamless looping.
+   */
+  async extendAudioWithCrossfade(
+    inputPath: string,
+    targetDuration: number,
+    outputPath: string,
+    opts?: {
+      /** Bar duration for bar-aligned loop points */
+      barDuration?: number;
+      /** Crossfade duration at loop point (default 0.5s) */
+      crossfadeDuration?: number;
+    }
+  ): Promise<string> {
+    const { barDuration, crossfadeDuration = 0.5 } = opts || {};
+
+    const currentDuration = await this.getAudioDuration(inputPath);
+    if (currentDuration >= targetDuration) {
+      return this.trimAudio(inputPath, targetDuration, outputPath);
+    }
+
+    try {
+      // Find best loop point
+      const loopPoints = await this.findLoopPoints(inputPath, {
+        barDuration,
+        minLoopLength: Math.max(4, currentDuration * 0.3),
+      });
+      const loopPoint = loopPoints[0]?.timestamp ?? currentDuration / 2;
+
+      logger.info(`Beat-aware extend: loop at ${loopPoint.toFixed(2)}s, crossfade ${crossfadeDuration}s`);
+
+      // Strategy: use the segment from start to loopPoint as the loop body.
+      // Each repetition crossfades with the previous iteration at the loop boundary.
+      const loopBodyDuration = loopPoint;
+      const loopsNeeded = Math.ceil((targetDuration - currentDuration) / loopBodyDuration) + 1;
+
+      return new Promise((resolve, reject) => {
+        try {
+          const command = ffmpeg();
+          const SAMPLE_RATE = 44100;
+          const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
+
+          // Input 0: full original track
+          command.input(inputPath);
+
+          // Input 1..N: copies for looping (each uses the loop body segment)
+          for (let i = 0; i < loopsNeeded; i++) {
+            command.input(inputPath);
+          }
+
+          const filters: string[] = [];
+          const concatLabels: string[] = [];
+
+          // First: play the full original track
+          filters.push(`[0:a]${norm}[orig]`);
+          concatLabels.push('[orig]');
+
+          // For each additional loop iteration: extract the loop body with crossfade tails
+          for (let i = 0; i < loopsNeeded; i++) {
+            const inputIdx = i + 1;
+            const label = `loop${i}`;
+            const xfade = Math.min(crossfadeDuration, loopBodyDuration * 0.2);
+
+            // Extract loop body: from 0 to loopPoint, with fade-in at the start
+            filters.push(
+              `[${inputIdx}:a]${norm},atrim=0:${loopPoint},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${xfade}:curve=tri,afade=t=out:st=${loopPoint - xfade}:d=${xfade}:curve=tri[${label}]`
+            );
+            concatLabels.push(`[${label}]`);
+          }
+
+          // Concatenate all segments
+          filters.push(`${concatLabels.join('')}concat=n=${concatLabels.length}:v=0:a=1[joined]`);
+
+          // Trim to exact target duration
+          filters.push(`[joined]atrim=0:${targetDuration},asetpts=PTS-STARTPTS[out]`);
+
+          const filterStr = filters.join(';');
+          command.outputOptions(['-filter_complex', filterStr, '-map', '[out]']);
+          this.setOutputOptions(command, 'mp3');
+          command.output(outputPath);
+
+          command
+            .on('end', () => {
+              logger.info(`Beat-aware extend completed: ${targetDuration}s`, { outputPath });
+              resolve(outputPath);
+            })
+            .on('error', (err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              logger.warn(`Beat-aware extend failed, falling back to simple loop: ${msg}`);
+              // Fallback to simple loop
+              this.extendAudioDuration(inputPath, targetDuration, outputPath)
+                .then(resolve)
+                .catch(reject);
+            });
+
+          command.run();
+        } catch (error: any) {
+          // Fallback to simple loop
+          this.extendAudioDuration(inputPath, targetDuration, outputPath)
+            .then(resolve)
+            .catch(reject);
+        }
+      });
+    } catch (err: any) {
+      logger.warn(`Beat-aware extend setup failed, falling back to simple loop: ${err.message}`);
+      return this.extendAudioDuration(inputPath, targetDuration, outputPath);
+    }
   }
 
   /**
