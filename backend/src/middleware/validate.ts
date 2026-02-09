@@ -1,0 +1,180 @@
+import { Request, Response, NextFunction } from 'express';
+import Joi from 'joi';
+import { AppError } from './errorHandler';
+
+export const validate = (schema: Joi.ObjectSchema) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const { error, value } = schema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+
+    if (error) {
+      const errorMessage = error.details
+        .map((detail) => detail.message)
+        .join(', ');
+      throw new AppError(errorMessage, 400);
+    }
+
+    // Replace request body with validated value
+    req.body = value;
+    next();
+  };
+};
+
+// Common validation schemas
+export const schemas = {
+  register: Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().min(6).required(),
+    firstName: Joi.string().optional(),
+    lastName: Joi.string().optional(),
+  }),
+
+  login: Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().required(),
+  }),
+
+  createProject: Joi.object({
+    name: Joi.string().min(1).max(255).required(),
+    description: Joi.string().max(1000).optional(),
+  }),
+
+  updateProject: Joi.object({
+    name: Joi.string().min(1).max(255).optional(),
+    description: Joi.string().max(1000).optional(),
+    status: Joi.string().valid('ACTIVE', 'ARCHIVED', 'DELETED').optional(),
+  }),
+
+  createScript: Joi.object({
+    projectId: Joi.string().uuid().required(),
+    title: Joi.string().min(1).max(255).required(),
+    content: Joi.string().required(),
+    metadata: Joi.object().optional(),
+  }),
+
+  generateScript: Joi.object({
+    projectId: Joi.string().uuid().required(),
+    prompt: Joi.string().min(10).max(2000).required(),
+    tone: Joi.string().optional(),
+    length: Joi.string().valid('short', 'medium', 'long').optional(),
+    targetAudience: Joi.string().optional(),
+    productName: Joi.string().optional(),
+    additionalContext: Joi.string().max(1000).optional(),
+    title: Joi.string().max(255).optional(),
+  }),
+
+  updateScript: Joi.object({
+    title: Joi.string().min(1).max(255).optional(),
+    content: Joi.string().optional(),
+    metadata: Joi.object().optional(),
+  }),
+
+  refineScript: Joi.object({
+    improvementRequest: Joi.string().min(10).max(1000).required(),
+  }),
+
+  generateVariations: Joi.object({
+    projectId: Joi.string().uuid().required(),
+    prompt: Joi.string().min(10).max(2000).required(),
+    tone: Joi.string().optional(),
+    length: Joi.string().valid('short', 'medium', 'long').optional(),
+    targetAudience: Joi.string().optional(),
+    productName: Joi.string().optional(),
+    count: Joi.number().min(1).max(5).optional(),
+  }),
+
+  /** Body for unified ad production JSON (script + context + music + fades + volume) */
+  generateAdProductionJSON: Joi.object({
+    prompt: Joi.string().min(10).max(2000).required(),
+    durationSeconds: Joi.number().min(5).max(120).optional(),
+    tone: Joi.string().max(100).optional(),
+  }),
+
+  generateTTS: Joi.object({
+    scriptId: Joi.string().uuid().required(),
+    voiceId: Joi.string().required(),
+    voiceSettings: Joi.object({
+      stability: Joi.number().min(0).max(1).optional(),
+      similarity_boost: Joi.number().min(0).max(1).optional(),
+      style: Joi.number().min(0).max(1).optional(),
+      use_speaker_boost: Joi.boolean().optional(),
+    }).optional(),
+  }),
+
+  generateTTSFromText: Joi.object({
+    text: Joi.string().min(1).max(5000).required(),
+    voiceId: Joi.string().required(),
+    voiceSettings: Joi.object({
+      stability: Joi.number().min(0).max(1).optional(),
+      similarity_boost: Joi.number().min(0).max(1).optional(),
+      style: Joi.number().min(0).max(1).optional(),
+      use_speaker_boost: Joi.boolean().optional(),
+    }).optional(),
+  }),
+
+  previewVoice: Joi.object({
+    text: Joi.string().min(1).max(500).optional(),
+  }),
+
+  generateMusic: Joi.object({
+    text: Joi.string().min(10).max(500).required(),
+    duration_seconds: Joi.number().min(0.5).max(22).optional(),
+    prompt_influence: Joi.number().min(0).max(1).optional(),
+    name: Joi.string().max(255).optional(),
+    genre: Joi.string().max(100).optional(),
+    mood: Joi.string().max(100).optional(),
+  }),
+
+  uploadMusicTrack: Joi.object({
+    name: Joi.string().min(1).max(255).required(),
+    description: Joi.string().max(1000).optional(),
+    genre: Joi.string().max(100).optional(),
+    mood: Joi.string().max(100).optional(),
+  }),
+
+  generateMusicPrompt: Joi.object({
+    genre: Joi.string().optional(),
+    mood: Joi.string().optional(),
+    tempo: Joi.string().optional(),
+    instruments: Joi.string().optional(),
+  }),
+
+  createProduction: Joi.object({
+    projectId: Joi.string().uuid().required(),
+    scriptId: Joi.string().uuid().optional(),
+    voiceId: Joi.string().optional(),
+    musicId: Joi.string().uuid().optional(),
+    settings: Joi.object({
+      voiceVolume: Joi.number().min(0).max(2).optional(),
+      musicVolume: Joi.number().min(0).max(2).optional(),
+      fadeIn: Joi.number().min(0).max(10).optional(),
+      fadeOut: Joi.number().min(0).max(10).optional(),
+      fadeCurve: Joi.string().valid('linear', 'exp', 'qsin').optional(),
+      audioDucking: Joi.boolean().optional(),
+      duckingAmount: Joi.number().min(0).max(1).optional(),
+      outputFormat: Joi.string().valid('mp3', 'wav', 'aac').optional(),
+      normalizeLoudness: Joi.boolean().optional(),
+      loudnessTargetLUFS: Joi.number().min(-60).max(0).optional(),
+    }).optional(),
+  }),
+
+  updateProduction: Joi.object({
+    scriptId: Joi.string().uuid().optional().allow(null),
+    voiceId: Joi.string().optional().allow(null),
+    musicId: Joi.string().uuid().optional().allow(null),
+    settings: Joi.object({
+      voiceVolume: Joi.number().min(0).max(2).optional(),
+      musicVolume: Joi.number().min(0).max(2).optional(),
+      fadeIn: Joi.number().min(0).max(10).optional(),
+      fadeOut: Joi.number().min(0).max(10).optional(),
+      fadeCurve: Joi.string().valid('linear', 'exp', 'qsin').optional(),
+      audioDucking: Joi.boolean().optional(),
+      duckingAmount: Joi.number().min(0).max(1).optional(),
+      outputFormat: Joi.string().valid('mp3', 'wav', 'aac').optional(),
+      normalizeLoudness: Joi.boolean().optional(),
+      loudnessTargetLUFS: Joi.number().min(-60).max(0).optional(),
+    }).optional(),
+  }),
+};
