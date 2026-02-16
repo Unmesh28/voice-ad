@@ -23,7 +23,9 @@ import sfxService from './sfx/sfx.service';
 import timelineComposerService from './audio/timeline-composer.service';
 import ffmpegService from './audio/ffmpeg.service';
 import type { AdCreativePlan } from '../types/ad-format';
+import type { MusicSelectionResult } from '../types/ad-production';
 import musicQualityService from './music/music-quality.service';
+import openaiService from './llm/openai.service';
 import mongoose from 'mongoose';
 
 interface QuickProductionInput {
@@ -209,262 +211,92 @@ export class ProductionOrchestrator {
       });
 
       await ttsJob.waitUntilFinished(ttsQueueEvents);
-      await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 50, 'Speech generated! Creating background music...');
+      await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 50, 'Speech generated! Selecting background music...');
 
-      // Re-fetch script so we have lastTTS.sentenceTimings (computed by TTS worker) for sentence-level music prompt
+      // Re-fetch script so we have lastTTS.sentenceTimings
       const scriptAfterTts = await Script.findById(script.id);
       const scriptForMusic = scriptAfterTts ?? script;
       const scriptMetadata = (scriptForMusic as any)?.metadata as any;
 
-      // ========== MUSIC DIRECTION (single source: LLM metadata) ==========
-      // The LLM already produced music direction during script generation.
-      // We use that directly -- no separate Music Director service to avoid
-      // conflicting direction from two systems.
-      let musicPrompt = `${tone} background music for advertisement`;
-      let musicGenre = 'corporate';
-      let musicMood = tone;
-      let targetBPM: number | undefined;
+      // ========== MUSIC SELECTION FROM LIBRARY (RAG) ==========
+      // Instead of generating music via Suno/ElevenLabs API, we select
+      // the best pre-analyzed track from the music library using LLM.
+      logger.info(`[Pipeline ${productionId}] Stage 3: Selecting music from library`);
 
-      if (scriptMetadata?.music?.prompt) {
-        musicPrompt = scriptMetadata.music.prompt;
-        if (scriptMetadata.music.genre) musicGenre = scriptMetadata.music.genre;
-        if (scriptMetadata.music.mood) musicMood = scriptMetadata.music.mood;
-        if (typeof scriptMetadata.music?.targetBPM === 'number') targetBPM = scriptMetadata.music.targetBPM;
-        logger.info(`[Pipeline ${productionId}] Using LLM music direction: ${musicPrompt.slice(0, 80)}...`, {
-          genre: musicGenre,
-          mood: musicMood,
-          targetBPM,
+      let musicSelection: MusicSelectionResult;
+      try {
+        const selectionResult = await openaiService.generateAdWithMusicSelection({
+          prompt,
+          durationSeconds: duration,
+          tone,
         });
-      } else {
-        try {
-          musicPrompt = await voiceSelectorService.generateMusicPrompt(scriptForMusic.content, duration);
-          logger.info(`[Pipeline ${productionId}] Generated music prompt (fallback): ${musicPrompt.slice(0, 60)}...`);
-        } catch (err: any) {
-          logger.warn(`[Pipeline ${productionId}] Music prompt fallback failed: ${err.message}`);
-        }
+        musicSelection = selectionResult.musicSelection;
+        logger.info(`[Pipeline ${productionId}] LLM selected track: ${musicSelection.selectedTrack.filename} - ${musicSelection.selectedTrack.reasoning}`);
+      } catch (selErr: any) {
+        logger.warn(`[Pipeline ${productionId}] Full music selection failed, trying standalone: ${selErr.message}`);
+        // Fallback: use the already-generated script metadata for selection
+        const llmMusicSelector = (await import('./music/llm-music-selector.service')).default;
+        musicSelection = await llmMusicSelector.selectMusic({
+          userPrompt: prompt,
+          script: script.content,
+          tone,
+          duration,
+          adCategory: scriptMetadata?.context?.adCategory,
+          emotion: scriptMetadata?.context?.emotion,
+          pace: scriptMetadata?.context?.pace,
+        });
       }
 
-      // ========== MUSICAL BLUEPRINT (Tier 2) ==========
-      // When TTS sentence timings are available, generate a precise musical
-      // blueprint with bar/beat alignment. The blueprint produces a bar-based
-      // Suno prompt that describes musical structure (bars, sections, energy)
-      // instead of timestamps (which Suno can't hit reliably).
-      const sentenceTimings = scriptMetadata?.lastTTS?.sentenceTimings as
-        | { text: string; startSeconds: number; endSeconds: number }[]
-        | undefined;
-      const hasSentenceTimings = Array.isArray(sentenceTimings) && sentenceTimings.length > 0;
+      const musicGenre = scriptMetadata?.music?.genre || 'corporate';
+      const musicMood = scriptMetadata?.music?.mood || tone;
 
-      let blueprint: MusicalBlueprint | undefined;
-      let sunoPayload: { customMode?: boolean; title?: string; style?: string; prompt: string } | undefined;
-
-      if (hasSentenceTimings && sentenceTimings) {
-        // Compute voice duration from sentence timings
-        const voiceDuration = sentenceTimings[sentenceTimings.length - 1].endSeconds;
-
-        blueprint = generateMusicalBlueprint({
-          script: scriptForMusic.content,
-          sentenceTimings,
-          sentenceCues: scriptMetadata.sentenceCues,
-          targetBPM: targetBPM ?? 100,
-          genre: musicGenre,
-          mood: musicMood,
-          totalVoiceDuration: voiceDuration,
-          composerDirection: scriptMetadata?.music?.composerDirection,
-          instrumentation: scriptMetadata?.music?.instrumentation,
-          arc: scriptMetadata?.music?.arc,
-          buttonEnding: scriptMetadata?.music?.buttonEnding,
-          musicalStructure: scriptMetadata?.music?.musicalStructure,
-        });
-
-        // Use blueprint's fine-tuned BPM
-        targetBPM = blueprint.finalBPM;
-
-        // Build Suno payload from the blueprint's bar-based prompt
-        const sunoResult = buildSunoPromptFromBlueprint(blueprint, musicGenre, duration);
-        sunoPayload = {
-          customMode: sunoResult.customMode,
-          title: sunoResult.title || undefined,
-          style: sunoResult.style || undefined,
-          prompt: sunoResult.prompt,
-        };
-
-        logger.info(`[Pipeline ${productionId}] Blueprint: ${blueprint.totalBars} bars @ ${blueprint.finalBPM} BPM, ` +
-          `pre-roll=${blueprint.preRollBars} bars, post-roll=${blueprint.postRollBars} bars, ` +
-          `${blueprint.sections.length} sections, ${blueprint.syncPoints.length} sync points`);
-        const logPrompt = sunoResult.style;
-        logger.info(`[Pipeline ${productionId}] Bar-based Suno prompt: ${logPrompt.slice(0, 120)}...`);
-        ttmPromptLogger.info(logPrompt, {
-          pipelineId: productionId,
-          provider: 'suno',
-          mode: 'custom',
-          title: sunoResult.title || undefined,
-          blueprintBPM: blueprint.finalBPM,
-          blueprintBars: blueprint.totalBars,
-        });
-      } else {
-        // Fallback: no sentence timings available, use the old prompt builder
-        logger.info(`[Pipeline ${productionId}] No sentence timings -- using legacy prompt builder`);
-        if (scriptMetadata?.music && typeof scriptMetadata.music === 'object') {
-          const productionContext = scriptMetadata.productionContext || scriptMetadata.adProductionJson?.context;
-          const contextForMusic =
-            productionContext &&
-              typeof productionContext.adCategory === 'string' &&
-              typeof productionContext.tone === 'string'
-              ? {
-                adCategory: productionContext.adCategory,
-                tone: productionContext.tone,
-                emotion: productionContext.emotion ?? productionContext.tone,
-                pace: productionContext.pace ?? 'moderate',
-              }
-              : undefined;
-          const sunoResult = buildSunoPromptFromScriptAnalysis({
-            music: {
-              prompt: musicPrompt,
-              targetBPM: targetBPM ?? 100,
-              genre: musicGenre,
-              mood: musicMood,
-              arc: scriptMetadata.music.arc,
-              composerDirection: scriptMetadata.music.composerDirection,
-            },
-            durationSeconds: duration,
-            context: contextForMusic ?? undefined,
-            fades: scriptMetadata.fades,
-            volume: scriptMetadata.volume,
-            mixPreset: scriptMetadata.mixPreset,
-            sentenceCues: scriptMetadata.sentenceCues,
-          });
-          sunoPayload = {
-            customMode: sunoResult.customMode,
-            title: sunoResult.title || undefined,
-            style: sunoResult.style || undefined,
-            prompt: sunoResult.prompt,
-          };
-
-          const logPrompt = sunoResult.customMode ? sunoResult.style : sunoResult.prompt;
-          logger.info(`[Pipeline ${productionId}] Suno composition prompt: ${logPrompt.slice(0, 120)}...`);
-          ttmPromptLogger.info(logPrompt, {
-            pipelineId: productionId,
-            provider: 'suno',
-            mode: sunoResult.customMode ? 'custom' : 'non-custom',
-            title: sunoResult.title || undefined,
-          });
-        }
-      }
-
-      // SINGLE-TRACK GENERATION ONLY.
-      // Segment mode is disabled -- one continuous track produces better results
-      // than crossfading separate clips.
-      const musicRequestDuration = blueprint ? Math.ceil(blueprint.totalDuration) : duration;
+      // Use the library track via music generation queue (instant file copy)
       const musicJob = await musicGenerationQueue.add('generate-music', {
         userId,
-        text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
-        duration_seconds: musicRequestDuration,
-        prompt_influence: 0.3,
+        text: musicSelection.selectedTrack.reasoning,
         genre: musicGenre,
         mood: musicMood,
-        targetBPM,
-        sunoCustomMode: sunoPayload?.customMode,
-        sunoTitle: sunoPayload?.title,
-        sunoStyle: sunoPayload?.style,
-        sunoPrompt: sunoPayload?.prompt,
-        segmentBasedGeneration: false,
+        libraryTrackFilename: musicSelection.selectedTrack.filename,
+        libraryTrackReasoning: musicSelection.selectedTrack.reasoning,
       });
       let musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
-      if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
-      logger.info(`[Pipeline ${productionId}] Music generated: ${musicResult.musicId}`);
-
-      // ========== MUSIC QUALITY GATE ==========
-      // Multi-dimensional quality scoring: duration, loudness, silence, dynamics.
-      // If score is below threshold, regenerate once.
-      const requestedDuration = musicRequestDuration;
-      try {
-        const musicTrack = await MusicTrack.findById(musicResult.musicId);
-        if (musicTrack?.fileUrl && requestedDuration > 0) {
-          const trackPath = path.join(
-            path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads'),
-            musicTrack.fileUrl.replace('/uploads/', '')
-          );
-          const quality = await musicQualityService.scoreTrack({
-            musicPath: trackPath,
-            expectedDuration: requestedDuration,
-            genre: musicGenre,
-          });
-
-          logger.info(`[Pipeline ${productionId}] Quality gate: score=${quality.score}, ${quality.summary}`, {
-            dimensions: quality.dimensions,
-            measurements: quality.measurements,
-          });
-
-          if (!quality.acceptable) {
-            logger.warn(`[Pipeline ${productionId}] Music quality below threshold (${quality.score}). Regenerating...`);
-            await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 55, 'Regenerating music for better quality...');
-
-            const retryJob = await musicGenerationQueue.add('generate-music', {
-              userId,
-              text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
-              duration_seconds: requestedDuration,
-              prompt_influence: 0.3,
-              genre: musicGenre,
-              mood: musicMood,
-              targetBPM,
-              sunoCustomMode: sunoPayload?.customMode,
-              sunoTitle: sunoPayload?.title,
-              sunoStyle: sunoPayload?.style,
-              sunoPrompt: sunoPayload?.prompt,
-              segmentBasedGeneration: false,
-            });
-            const retryResult = await retryJob.waitUntilFinished(musicQueueEvents);
-            if (retryResult?.musicId) {
-              musicResult = retryResult;
-              logger.info(`[Pipeline ${productionId}] Retry music generated: ${retryResult.musicId}`);
-            }
-          }
-        }
-      } catch (gateErr: any) {
-        // Non-fatal: quality gate failure should not block the pipeline
-        logger.warn(`[Pipeline ${productionId}] Quality gate check failed: ${gateErr.message}`);
-      }
+      if (!musicResult?.musicId) throw new Error('Music selection failed - no music ID returned');
+      logger.info(`[Pipeline ${productionId}] Music selected: ${musicResult.musicId} (${musicSelection.selectedTrack.filename})`);
 
       await Production.findByIdAndUpdate(productionId, {
         musicId: new mongoose.Types.ObjectId(musicResult.musicId),
       });
 
-      await this.updateProductionStatus(productionId, 'MIXING', 70, 'Music generated! Mixing audio...');
+      await this.updateProductionStatus(productionId, 'MIXING', 70, 'Music selected! Mixing audio...');
 
-      // Stage 4: Mix Audio – use LLM fades/volume from script metadata when available
+      // Stage 4: Mix Audio – use LLM-selected mixing parameters from music selection
       logger.info(`[Pipeline ${productionId}] Stage 4: Mixing audio`);
-      // Loudness: crossPlatform = -16 LUFS, -2 dBTP (Spotify/podcasts); broadcast = -24 LUFS, -2 dBTP (FCC/EBU)
+      const mp = musicSelection.mixingParameters;
       const mixSettings: Record<string, unknown> = {
-        voiceVolume: 1.0,
-        musicVolume: 0.12,
-        fadeIn: 0.1,
-        fadeOut: 0.4,
-        audioDucking: true,
+        voiceVolume: mp.voiceVolume,
+        musicVolume: mp.musicVolume,
+        fadeIn: mp.fadeInSeconds,
+        fadeOut: mp.fadeOutSeconds,
+        fadeCurve: mp.fadeCurve,
+        audioDucking: mp.audioDucking,
+        duckingAmount: mp.duckingAmount,
+        musicDelay: mp.musicDelay,
         outputFormat: 'mp3',
         normalizeLoudness: true,
         loudnessPreset: 'crossPlatform',
         loudnessTargetLUFS: -16,
         loudnessTruePeak: -2,
-        // Pass BPM + genre so mixing worker can do bar-aligned trim/loop
-        targetBPM: targetBPM ?? 100,
         genre: musicGenre,
-        // Blueprint data for the mixing worker (when available)
-        ...(blueprint ? {
-          blueprintPreRollDuration: blueprint.preRollDuration,
-          blueprintPostRollDuration: blueprint.postRollDuration,
-          blueprintTotalDuration: blueprint.totalDuration,
-          blueprintBarDuration: blueprint.barDuration,
-          blueprintTotalBars: blueprint.totalBars,
-        } : {}),
       };
+      // Override with script metadata if available (finer control)
       if (scriptMetadata?.fades) {
-        mixSettings.fadeIn = scriptMetadata.fades.fadeInSeconds ?? 0.1;
-        mixSettings.fadeOut = scriptMetadata.fades.fadeOutSeconds ?? 0.4;
+        mixSettings.fadeIn = scriptMetadata.fades.fadeInSeconds ?? mp.fadeInSeconds;
+        mixSettings.fadeOut = scriptMetadata.fades.fadeOutSeconds ?? mp.fadeOutSeconds;
         if (scriptMetadata.fades.curve) mixSettings.fadeCurve = scriptMetadata.fades.curve;
       }
       if (scriptMetadata?.volume) {
-        mixSettings.voiceVolume = scriptMetadata.volume.voiceVolume ?? 1.0;
-        mixSettings.musicVolume = scriptMetadata.volume.musicVolume ?? 0.15;
+        mixSettings.voiceVolume = scriptMetadata.volume.voiceVolume ?? mp.voiceVolume;
+        mixSettings.musicVolume = scriptMetadata.volume.musicVolume ?? mp.musicVolume;
         if (scriptMetadata.volume.segments?.length) mixSettings.volumeSegments = scriptMetadata.volume.segments;
       }
       if (scriptMetadata?.mixPreset) {
@@ -474,9 +306,7 @@ export class ProductionOrchestrator {
           balanced: 0.35,
           musicEmotional: 0.2,
         };
-        mixSettings.duckingAmount = presetDucking[scriptMetadata.mixPreset] ?? 0.35;
-      } else {
-        mixSettings.duckingAmount = 0.35;
+        mixSettings.duckingAmount = presetDucking[scriptMetadata.mixPreset] ?? mp.duckingAmount;
       }
 
       const productionDoc = await Production.findById(productionId).lean();
@@ -607,137 +437,52 @@ export class ProductionOrchestrator {
         })
       : Promise.resolve(new Map<number, any>());
 
-    // ── Stage 3: Music Generation (same as legacy) ────────────────────
-    logger.info(`[Pipeline ${productionId}] Stage 3: Generating music`);
+    // ── Stage 3: Music Selection from Library (RAG) ────────────────────
+    logger.info(`[Pipeline ${productionId}] Stage 3: Selecting music from library`);
 
-    // Use adFormat's overallMusicDirection as the primary music prompt
-    let musicPrompt = adFormat.overallMusicDirection || `${tone} background music for advertisement`;
     let musicGenre = scriptMetadata?.music?.genre || 'corporate';
     let musicMood = scriptMetadata?.music?.mood || tone;
-    let targetBPM = scriptMetadata?.music?.targetBPM as number | undefined;
 
-    // Override with LLM music metadata if available
-    if (scriptMetadata?.music?.prompt) {
-      // Prefer the LLM's detailed prompt but append cultural context
-      musicPrompt = scriptMetadata.music.prompt;
-      if (adFormat.culturalContext) {
-        musicPrompt += `. Cultural style: ${adFormat.culturalContext}`;
-      }
-      if (scriptMetadata.music.genre) musicGenre = scriptMetadata.music.genre;
-      if (scriptMetadata.music.mood) musicMood = scriptMetadata.music.mood;
-      if (typeof scriptMetadata.music.targetBPM === 'number') targetBPM = scriptMetadata.music.targetBPM;
-    }
-
-    // Generate musical blueprint if we have sentence timings
-    let blueprint: MusicalBlueprint | undefined;
-    let sunoPayload: { customMode?: boolean; title?: string; style?: string; prompt: string } | undefined;
-
-    if (allSentenceTimings.length > 0) {
-      blueprint = generateMusicalBlueprint({
+    // Select music from library via LLM
+    let segmentMusicSelection: MusicSelectionResult;
+    try {
+      const llmMusicSelector = (await import('./music/llm-music-selector.service')).default;
+      segmentMusicSelection = await llmMusicSelector.selectMusic({
+        userPrompt: (script as any).metadata?.prompt || script.content,
         script: script.content,
-        sentenceTimings: allSentenceTimings,
-        sentenceCues: scriptMetadata?.sentenceCues,
-        targetBPM: targetBPM ?? 100,
-        genre: musicGenre,
-        mood: musicMood,
-        totalVoiceDuration: ttsResult.totalVoiceDuration,
-        composerDirection: scriptMetadata?.music?.composerDirection,
-        instrumentation: scriptMetadata?.music?.instrumentation,
-        arc: scriptMetadata?.music?.arc,
-        buttonEnding: scriptMetadata?.music?.buttonEnding,
-        musicalStructure: scriptMetadata?.music?.musicalStructure,
+        tone,
+        duration,
+        adCategory: scriptMetadata?.context?.adCategory,
+        emotion: scriptMetadata?.context?.emotion,
+        pace: scriptMetadata?.context?.pace,
       });
-      targetBPM = blueprint.finalBPM;
-      const sunoResult = buildSunoPromptFromBlueprint(blueprint, musicGenre, duration);
-      sunoPayload = {
-        customMode: sunoResult.customMode,
-        title: sunoResult.title || undefined,
-        style: sunoResult.style || undefined,
-        prompt: sunoResult.prompt,
+      logger.info(`[Pipeline ${productionId}] LLM selected track: ${segmentMusicSelection.selectedTrack.filename}`);
+    } catch (selErr: any) {
+      logger.warn(`[Pipeline ${productionId}] Music selection failed, using fallback: ${selErr.message}`);
+      const musicLibrary = (await import('./music/music-library.service')).default;
+      const summaries = musicLibrary.getTrackSummaries();
+      segmentMusicSelection = {
+        selectedTrack: { filename: summaries[0]?.filename || '', reasoning: 'Fallback' },
+        mixingParameters: { musicVolume: 0.15, fadeInSeconds: 0.1, fadeOutSeconds: 0.4, fadeCurve: 'exp', voiceVolume: 1.0, audioDucking: true, duckingAmount: 0.35, musicDelay: 1.0 },
       };
-      logger.info(`[Pipeline ${productionId}] Blueprint: ${blueprint.totalBars} bars @ ${blueprint.finalBPM} BPM`);
-    } else {
-      // Fallback: use the ad format's total duration for music
-      logger.info(`[Pipeline ${productionId}] No sentence timings — using direct music prompt`);
     }
-
-    const musicRequestDuration = blueprint ? Math.ceil(blueprint.totalDuration) : Math.ceil(adFormat.totalDuration);
-
-    // Enable segment-based generation when the LLM provided a multi-segment arc
-    const musicArc = scriptMetadata?.music?.arc as { startSeconds: number; endSeconds: number; label: string; musicPrompt: string; targetBPM?: number; energyLevel?: number }[] | undefined;
-    const useSegmentGeneration = Array.isArray(musicArc) && musicArc.length >= 2;
 
     const musicJob = await musicGenerationQueue.add('generate-music', {
       userId,
-      text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
-      duration_seconds: musicRequestDuration,
-      prompt_influence: 0.3,
+      text: segmentMusicSelection.selectedTrack.reasoning,
       genre: musicGenre,
       mood: musicMood,
-      targetBPM,
-      sunoCustomMode: sunoPayload?.customMode,
-      sunoTitle: sunoPayload?.title,
-      sunoStyle: sunoPayload?.style,
-      sunoPrompt: sunoPayload?.prompt,
-      segmentBasedGeneration: useSegmentGeneration,
-      arc: useSegmentGeneration ? musicArc : undefined,
-      enableSmartOverlap: true,
-      musicMetadata: useSegmentGeneration ? {
-        instrumentation: scriptMetadata?.music?.instrumentation,
-        composerDirection: scriptMetadata?.music?.composerDirection,
-        buttonEnding: scriptMetadata?.music?.buttonEnding,
-      } : undefined,
+      libraryTrackFilename: segmentMusicSelection.selectedTrack.filename,
+      libraryTrackReasoning: segmentMusicSelection.selectedTrack.reasoning,
     });
-    logger.info(`[Pipeline ${productionId}] Music generation: ${useSegmentGeneration ? `segment-based (${musicArc!.length} segments)` : 'single-track'}`);
     let musicResult = await musicJob.waitUntilFinished(musicQueueEvents);
-    if (!musicResult?.musicId) throw new Error('Music generation failed - no music ID returned');
-
-    // Quality gate — multi-dimensional scoring
-    try {
-      const musicTrackForGate = await MusicTrack.findById(musicResult.musicId);
-      if (musicTrackForGate?.fileUrl && musicRequestDuration > 0) {
-        const trackPath = path.join(uploadDir, musicTrackForGate.fileUrl.replace('/uploads/', ''));
-        const quality = await musicQualityService.scoreTrack({
-          musicPath: trackPath,
-          expectedDuration: musicRequestDuration,
-          genre: musicGenre,
-        });
-
-        logger.info(`[Pipeline ${productionId}] Quality gate: score=${quality.score}, ${quality.summary}`, {
-          dimensions: quality.dimensions,
-        });
-
-        if (!quality.acceptable) {
-          logger.warn(`[Pipeline ${productionId}] Music quality below threshold (${quality.score}). Regenerating...`);
-          await this.updateProductionStatus(productionId, 'GENERATING_MUSIC', 60, 'Regenerating music for better quality...');
-          // Retry with single-track (more reliable)
-          const retryJob = await musicGenerationQueue.add('generate-music', {
-            userId,
-            text: targetBPM != null ? `${targetBPM} BPM, ${musicPrompt}` : musicPrompt,
-            duration_seconds: musicRequestDuration,
-            prompt_influence: 0.3,
-            genre: musicGenre,
-            mood: musicMood,
-            targetBPM,
-            sunoCustomMode: sunoPayload?.customMode,
-            sunoTitle: sunoPayload?.title,
-            sunoStyle: sunoPayload?.style,
-            sunoPrompt: sunoPayload?.prompt,
-            segmentBasedGeneration: false,
-          });
-          const retryResult = await retryJob.waitUntilFinished(musicQueueEvents);
-          if (retryResult?.musicId) musicResult = retryResult;
-        }
-      }
-    } catch (gateErr: any) {
-      logger.warn(`[Pipeline ${productionId}] Quality gate check failed: ${gateErr.message}`);
-    }
+    if (!musicResult?.musicId) throw new Error('Music selection failed - no music ID returned');
 
     await Production.findByIdAndUpdate(productionId, {
       musicId: new mongoose.Types.ObjectId(musicResult.musicId),
     });
 
-    logger.info(`[Pipeline ${productionId}] Music generated: ${musicResult.musicId}`);
+    logger.info(`[Pipeline ${productionId}] Music selected: ${musicResult.musicId} (${segmentMusicSelection.selectedTrack.filename})`);
 
     // Wait for SFX to finish
     sfxResultMap = await sfxPromise;

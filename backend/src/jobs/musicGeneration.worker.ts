@@ -9,6 +9,7 @@ import { UsageRecord } from '../models/UsageRecord';
 import elevenLabsMusicService from '../services/music/elevenlabs-music.service';
 import kieSunoMusicService from '../services/music/kie-suno-music.service';
 import { ELEVENLABS_MUSIC_PROMPT_MAX } from '../services/music/suno-prompt-builder';
+import musicLibraryService from '../services/music/music-library.service';
 import { logger, ttmPromptLogger } from '../config/logger';
 import redisConnection from '../config/redis';
 import { v4 as uuidv4 } from 'uuid';
@@ -64,6 +65,10 @@ interface MusicGenerationJobData {
       description?: string;
     };
   };
+  /** When set, use pre-analyzed music from library instead of generating via API */
+  libraryTrackFilename?: string;
+  /** Reasoning for why this track was selected */
+  libraryTrackReasoning?: string;
 }
 
 /**
@@ -412,6 +417,112 @@ const processSegmentBasedGeneration = async (job: Job<MusicGenerationJobData>) =
 };
 
 /**
+ * Process library-based music selection: copy the pre-analyzed track from the
+ * music library instead of generating via API. This is instant (no polling).
+ */
+const processLibraryTrackSelection = async (job: Job<MusicGenerationJobData>) => {
+  const { userId, libraryTrackFilename, libraryTrackReasoning, name, genre, mood } = job.data;
+
+  logger.info(`Processing library-based music selection for job ${job.id}: ${libraryTrackFilename}`);
+
+  try {
+    await job.updateProgress(20);
+
+    // Resolve source path from library
+    const sourcePath = musicLibraryService.getTrackFilePath(libraryTrackFilename!);
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`Library track not found: ${sourcePath}`);
+    }
+
+    await job.updateProgress(40);
+
+    // Copy to uploads directory
+    const ext = path.extname(libraryTrackFilename!);
+    const outputFilename = `music_${uuidv4()}${ext}`;
+    const uploadsDir = path.join(process.cwd(), 'uploads', 'music');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    const destPath = path.join(uploadsDir, outputFilename);
+    fs.copyFileSync(sourcePath, destPath);
+
+    await job.updateProgress(70);
+
+    // Get track info from catalog for metadata
+    const trackInfo = musicLibraryService.getTrackByFilename(libraryTrackFilename!);
+    const duration = trackInfo?.technical?.file_info?.duration_seconds ?? 0;
+
+    const musicUrl = `/uploads/music/${outputFilename}`;
+
+    // Save to database
+    const musicTrack = new MusicTrack({
+      name: name || `Library Track: ${libraryTrackFilename}`,
+      description: libraryTrackReasoning || `Selected from music library: ${libraryTrackFilename}`,
+      genre: genre || trackInfo?.human_analysis?.genre || undefined,
+      mood: mood || trackInfo?.human_analysis?.mood || undefined,
+      duration,
+      fileUrl: musicUrl,
+      isGenerated: false,
+      metadata: {
+        provider: 'music_library',
+        libraryTrack: libraryTrackFilename,
+        selectionReasoning: libraryTrackReasoning,
+        generatedAt: new Date().toISOString(),
+        jobId: job.id,
+      },
+    });
+    await musicTrack.save();
+
+    // Track usage
+    const usageRecord = new UsageRecord({
+      userId: new mongoose.Types.ObjectId(userId),
+      resourceType: 'MUSIC_GENERATION',
+      quantity: 1,
+      metadata: {
+        musicId: musicTrack.id,
+        duration,
+        provider: 'music_library',
+        libraryTrack: libraryTrackFilename,
+        jobId: job.id,
+      },
+    });
+    await usageRecord.save();
+
+    await job.updateProgress(100);
+
+    logger.info(`Library music selection completed for job ${job.id}`, {
+      musicId: musicTrack.id,
+      track: libraryTrackFilename,
+      duration,
+    });
+
+    return {
+      success: true,
+      musicId: musicTrack.id,
+      musicUrl,
+      duration,
+      provider: 'music_library',
+    };
+  } catch (error: any) {
+    logger.error(`Library music selection failed for job ${job.id}:`, {
+      error: error.message,
+      track: libraryTrackFilename,
+    });
+
+    const jobRecord = new JobModel({
+      type: 'MUSIC_GENERATION',
+      payload: job.data as any,
+      status: 'FAILED',
+      errorMessage: error.message,
+      attempts: job.attemptsMade,
+    });
+    await jobRecord.save();
+
+    throw error;
+  }
+};
+
+/**
  * Process music generation jobs
  */
 const processMusicGeneration = async (job: Job<MusicGenerationJobData>) => {
@@ -438,6 +549,13 @@ const processMusicGeneration = async (job: Job<MusicGenerationJobData>) => {
   try {
     // Update job progress
     await job.updateProgress(10);
+
+    // ========== LIBRARY-BASED MUSIC SELECTION ==========
+    // When libraryTrackFilename is provided, copy the pre-analyzed track
+    // from the music library instead of generating via API.
+    if (job.data.libraryTrackFilename) {
+      return await processLibraryTrackSelection(job);
+    }
 
     const segmentBasedGeneration = job.data.segmentBasedGeneration && job.data.arc && job.data.arc.length >= 2;
 
