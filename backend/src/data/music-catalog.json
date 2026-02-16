@@ -1,0 +1,2137 @@
+{
+  "metadata": {
+    "total_tracks": 47,
+    "source_folder": "/Users/unmeshdabhade/Downloads/music",
+    "generated_at": "2026-02-15T09:17:59.056541",
+    "openai_model": "gpt-4o-audio-preview"
+  },
+  "tracks": [
+    {
+      "filename": "10SECONDS2019-10-21_-_Feels_Good_-_David_Fesliyan.mp3",
+      "relative_path": "10SECONDS2019-10-21_-_Feels_Good_-_David_Fesliyan.mp3",
+      "file_size_mb": 0.7,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 18.29,
+          "total_samples": 806400
+        },
+        "rhythm": {
+          "tempo_bpm": 107.67,
+          "num_beats_detected": 28,
+          "avg_onset_strength": 1.4613
+        },
+        "tonal": {
+          "estimated_key": "F minor",
+          "key_confidence": 0.8021
+        }
+      },
+      "human_analysis": {
+        "raw_response": "Sure, please play the audio track.",
+        "parse_error": "Could not parse JSON from OpenAI response"
+      }
+    },
+    {
+      "filename": "2017-04-14_-_Happy_Dreams_-_David_Fesliyan.mp3",
+      "relative_path": "2017-04-14_-_Happy_Dreams_-_David_Fesliyan.mp3",
+      "file_size_mb": 6.58,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 172.49,
+          "total_samples": 7606656
+        },
+        "rhythm": {
+          "tempo_bpm": 82.03,
+          "num_beats_detected": 226,
+          "avg_onset_strength": 1.0652
+        },
+        "tonal": {
+          "estimated_key": "C major",
+          "key_confidence": 0.9203
+        }
+      },
+      "human_analysis": {
+        "genre": "pop with elements of electronic dance music (EDM)",
+        "mood": "uplifting and energetic",
+        "energy_level": "high",
+        "instruments_detected": [
+          "synthesizers",
+          "electronic drums",
+          "bass",
+          "vocal samples"
+        ],
+        "vocal_description": "female vocals, pop style, English language",
+        "brief_description": "This track is a high-energy pop song with strong electronic dance elements.",
+        "suitable_use_cases": [
+          "party",
+          "workout",
+          "driving",
+          "clubs"
+        ],
+        "similar_artists_or_styles": [
+          "Dua Lipa",
+          "Calvin Harris",
+          "Ariana Grande"
+        ],
+        "production_style": "polished and electronic with a modern pop production",
+        "tempo_feel": "driving beat with a danceable rhythm"
+      }
+    },
+    {
+      "filename": "2018-07-02_-_Tears_of_Joy_-_David_Fesliyan.mp3",
+      "relative_path": "2018-07-02_-_Tears_of_Joy_-_David_Fesliyan.mp3",
+      "file_size_mb": 6.37,
+      "technical": {
+        "file_info": {
+          "sample_rate": 48000,
+          "duration_seconds": 166.87,
+          "total_samples": 8009856
+        },
+        "rhythm": {
+          "tempo_bpm": 73.05,
+          "num_beats_detected": 163,
+          "avg_onset_strength": 0.697
+        },
+        "tonal": {
+          "estimated_key": "B major",
+          "key_confidence": 0.8445
+        }
+      },
+      "human_analysis": {
+        "genre": "Ambient, Neoclassical",
+        "mood": "Calm, introspective, and serene",
+        "energy_level": "low",
+        "instruments_detected": [
+          "piano",
+          "strings",
+          "synth pads"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and calming piece, featuring a gentle piano melody layered with soft strings and atmospheric synth pads.",
+        "suitable_use_cases": [
+          "meditation",
+          "study",
+          "relaxation",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Olafur Arnalds",
+          "Max Richter",
+          "Nils Frahm"
+        ],
+        "production_style": "polished and atmospheric, with a focus on clarity and spatial depth",
+        "tempo_feel": "slow and flowing, with a gentle, meditative rhythm"
+      }
+    },
+    {
+      "filename": "2018-11-27_-_In_A_Jiffy_-_FesliyanStudios.com_By_Stephen_Bennett.mp3",
+      "relative_path": "2018-11-27_-_In_A_Jiffy_-_FesliyanStudios.com_By_Stephen_Bennett.mp3",
+      "file_size_mb": 1.15,
+      "technical": {
+        "file_info": {
+          "sample_rate": 48000,
+          "duration_seconds": 30.05,
+          "total_samples": 1442304
+        },
+        "rhythm": {
+          "tempo_bpm": 112.5,
+          "num_beats_detected": 52,
+          "avg_onset_strength": 1.1876
+        },
+        "tonal": {
+          "estimated_key": "E minor",
+          "key_confidence": 0.7076
+        }
+      },
+      "human_analysis": {
+        "genre": "Jazz, Smooth Jazz",
+        "mood": "Relaxed and sophisticated",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "saxophone",
+          "piano",
+          "bass",
+          "drums"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is a smooth jazz track with a laid-back groove, featuring a prominent saxophone melody.",
+        "suitable_use_cases": [
+          "study",
+          "relaxation",
+          "dinner background",
+          "lounge atmosphere"
+        ],
+        "similar_artists_or_styles": [
+          "Kenny G",
+          "Dave Koz",
+          "Grover Washington Jr."
+        ],
+        "production_style": "polished and studio-produced",
+        "tempo_feel": "laid-back groove"
+      }
+    },
+    {
+      "filename": "2018-11-27_-_Track_A_-_FesliyanStudios.com_By_Stephen_Bennett.mp3",
+      "relative_path": "2018-11-27_-_Track_A_-_FesliyanStudios.com_By_Stephen_Bennett.mp3",
+      "file_size_mb": 1.15,
+      "technical": {
+        "file_info": {
+          "sample_rate": 48000,
+          "duration_seconds": 30.05,
+          "total_samples": 1442304
+        },
+        "rhythm": {
+          "tempo_bpm": 119.68,
+          "num_beats_detected": 52,
+          "avg_onset_strength": 1.1949
+        },
+        "tonal": {
+          "estimated_key": "A major",
+          "key_confidence": 0.5886
+        }
+      },
+      "human_analysis": {
+        "genre": "Electronic, Synthwave",
+        "mood": "uplifting and nostalgic",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "synthesizers",
+          "drum machine",
+          "bass"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a synth-heavy instrumental piece with a nostalgic 80s vibe.",
+        "suitable_use_cases": [
+          "driving",
+          "studying",
+          "retro-themed parties",
+          "background music for tech-related content"
+        ],
+        "similar_artists_or_styles": [
+          "Kavinsky",
+          "Com Truise",
+          "Perturbator"
+        ],
+        "production_style": "polished and electronic with a retro 80s-inspired aesthetic",
+        "tempo_feel": "steady, driving beat with a retro groove"
+      }
+    },
+    {
+      "filename": "2020-01-19_-_Slick_Move_-_FesliyanStudios.com_-_David_Renda.mp3",
+      "relative_path": "2020-01-19_-_Slick_Move_-_FesliyanStudios.com_-_David_Renda.mp3",
+      "file_size_mb": 5.87,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 153.94,
+          "total_samples": 6788736
+        },
+        "rhythm": {
+          "tempo_bpm": 92.29,
+          "num_beats_detected": 224,
+          "avg_onset_strength": 1.1233
+        },
+        "tonal": {
+          "estimated_key": "G# minor",
+          "key_confidence": 0.6539
+        }
+      },
+      "human_analysis": {
+        "genre": "Electronic, Synthwave with elements of Chillwave",
+        "mood": "uplifting and futuristic with a sense of nostalgia",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "synthesizers",
+          "electronic drums",
+          "bass"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is an instrumental synthwave piece with a nostalgic yet futuristic vibe.",
+        "suitable_use_cases": [
+          "driving",
+          "studying",
+          "background music for futuristic or sci-fi themed content",
+          "relaxation"
+        ],
+        "similar_artists_or_styles": [
+          "Kavinsky",
+          "Com Truise",
+          "Tycho"
+        ],
+        "production_style": "polished and electronic, with a retro-futuristic aesthetic",
+        "tempo_feel": "steady, driving beat with a laid-back groove"
+      }
+    },
+    {
+      "filename": "2020-12-13_-_Shire_Girl_-_David_Fesliyan.mp3",
+      "relative_path": "2020-12-13_-_Shire_Girl_-_David_Fesliyan.mp3",
+      "file_size_mb": 8.21,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 215.14,
+          "total_samples": 9487872
+        },
+        "rhythm": {
+          "tempo_bpm": 129.2,
+          "num_beats_detected": 447,
+          "avg_onset_strength": 1.3063
+        },
+        "tonal": {
+          "estimated_key": "A minor",
+          "key_confidence": 0.4306
+        }
+      },
+      "human_analysis": {
+        "genre": "Electronic, Ambient",
+        "mood": "uplifting and serene",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "synthesizers",
+          "electronic drums",
+          "pads"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is a serene and uplifting ambient electronic track with smooth synthesizers and a steady beat.",
+        "suitable_use_cases": [
+          "study",
+          "relaxation",
+          "meditation",
+          "background music"
+        ],
+        "similar_artists_or_styles": [
+          "Tycho",
+          "Bonobo",
+          "Boards of Canada"
+        ],
+        "production_style": "polished, electronic, atmospheric",
+        "tempo_feel": "steady, laid-back groove"
+      }
+    },
+    {
+      "filename": "2941758cd4baed24.mp3",
+      "relative_path": "2941758cd4baed24.mp3",
+      "file_size_mb": 1.33,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 116.04,
+          "total_samples": 5117184
+        },
+        "rhythm": {
+          "tempo_bpm": 147.66,
+          "num_beats_detected": 251,
+          "avg_onset_strength": 0.9189
+        },
+        "tonal": {
+          "estimated_key": "G# major",
+          "key_confidence": 0.7896
+        }
+      },
+      "human_analysis": {
+        "genre": "Ambient, Electronic",
+        "mood": "Calm, introspective, and atmospheric",
+        "energy_level": "low",
+        "instruments_detected": [
+          "synthesizers",
+          "soft pads",
+          "ambient textures"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a calm and atmospheric ambient piece with gentle synthesizers and evolving textures.",
+        "suitable_use_cases": [
+          "meditation",
+          "study",
+          "relaxation",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Brian Eno",
+          "Aphex Twin (ambient works)",
+          "Stars of the Lid"
+        ],
+        "production_style": "polished, atmospheric, and electronic",
+        "tempo_feel": "laid-back, floating, and free-form"
+      }
+    },
+    {
+      "filename": "41301b741b609a34c46320ce4b71d402.mp3",
+      "relative_path": "41301b741b609a34c46320ce4b71d402.mp3",
+      "file_size_mb": 2.21,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 192.68,
+          "total_samples": 8497152
+        },
+        "rhythm": {
+          "tempo_bpm": 178.21,
+          "num_beats_detected": 552,
+          "avg_onset_strength": 1.1947
+        },
+        "tonal": {
+          "estimated_key": "C# major",
+          "key_confidence": 0.8068
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical with elements of traditional Indian music",
+        "mood": "Serene and contemplative",
+        "energy_level": "low",
+        "instruments_detected": [
+          "sitar",
+          "flute",
+          "tabla",
+          "string section"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and meditative instrumental piece that blends classical Indian instruments.",
+        "suitable_use_cases": [
+          "meditation",
+          "study",
+          "relaxation",
+          "yoga"
+        ],
+        "similar_artists_or_styles": [
+          "Ravi Shankar",
+          "Anoushka Shankar",
+          "Pandit Hariprasad Chaurasia"
+        ],
+        "production_style": "polished and acoustic, with a live performance feel",
+        "tempo_feel": "laid-back and flowing, with a gentle rhythmic pulse"
+      }
+    },
+    {
+      "filename": "61a37c2bf2d8f1dc721f8714549ed3fa.mp3",
+      "relative_path": "61a37c2bf2d8f1dc721f8714549ed3fa.mp3",
+      "file_size_mb": 1.78,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 155.79,
+          "total_samples": 6870528
+        },
+        "rhythm": {
+          "tempo_bpm": 120.19,
+          "num_beats_detected": 291,
+          "avg_onset_strength": 1.2021
+        },
+        "tonal": {
+          "estimated_key": "C major",
+          "key_confidence": 0.7737
+        }
+      },
+      "human_analysis": {
+        "genre": "Traditional folk with Middle Eastern or North African influences",
+        "mood": "uplifting and celebratory",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "oud",
+          "flute",
+          "hand drums",
+          "possibly a violin"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This instrumental track features traditional Middle Eastern instruments like the oud and flute.",
+        "suitable_use_cases": [
+          "cultural events",
+          "background music for dining",
+          "film score",
+          "relaxation"
+        ],
+        "similar_artists_or_styles": [
+          "traditional Middle Eastern ensembles",
+          "Anouar Brahem"
+        ],
+        "production_style": "polished but retains a live and organic feel",
+        "tempo_feel": "steady, rhythmic groove with a lively and danceable feel"
+      }
+    },
+    {
+      "filename": "63663c1dfd29e9cb.mp3",
+      "relative_path": "63663c1dfd29e9cb.mp3",
+      "file_size_mb": 1.07,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 93.52,
+          "total_samples": 4124160
+        },
+        "rhythm": {
+          "tempo_bpm": 120.19,
+          "num_beats_detected": 169,
+          "avg_onset_strength": 0.9932
+        },
+        "tonal": {
+          "estimated_key": "E minor",
+          "key_confidence": 0.4374
+        }
+      },
+      "human_analysis": {
+        "genre": "Ambient, World Music",
+        "mood": "Calm, meditative, and introspective",
+        "energy_level": "low",
+        "instruments_detected": [
+          "flute",
+          "hand percussion",
+          "string instrument",
+          "drone-like background tones"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and meditative piece that blends ambient textures with world music influences.",
+        "suitable_use_cases": [
+          "meditation",
+          "yoga",
+          "relaxation",
+          "film score",
+          "study"
+        ],
+        "similar_artists_or_styles": [
+          "Brian Eno",
+          "Ravi Shankar",
+          "Dead Can Dance",
+          "Steve Roach"
+        ],
+        "production_style": "Polished but organic, with a focus on natural acoustic sounds",
+        "tempo_feel": "slow and fluid, with a laid-back, meditative groove"
+      }
+    },
+    {
+      "filename": "6a8864b9b51db1a855f1c717c135d958.mp3",
+      "relative_path": "6a8864b9b51db1a855f1c717c135d958.mp3",
+      "file_size_mb": 2.19,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 191.58,
+          "total_samples": 8448768
+        },
+        "rhythm": {
+          "tempo_bpm": 120.19,
+          "num_beats_detected": 369,
+          "avg_onset_strength": 1.1983
+        },
+        "tonal": {
+          "estimated_key": "E major",
+          "key_confidence": 0.7635
+        }
+      },
+      "human_analysis": {
+        "genre": "Traditional folk with Middle Eastern influences",
+        "mood": "Warm, nostalgic, and slightly melancholic",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "oud",
+          "violin",
+          "percussion (hand drums)",
+          "possibly qanun"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a beautifully crafted instrumental piece featuring traditional Middle Eastern instruments.",
+        "suitable_use_cases": [
+          "relaxation",
+          "study",
+          "background for cultural documentaries",
+          "meditation"
+        ],
+        "similar_artists_or_styles": [
+          "Anouar Brahem",
+          "Le Trio Joubran"
+        ],
+        "production_style": "polished, acoustic, and live-sounding",
+        "tempo_feel": "laid-back groove with a steady, flowing rhythm"
+      }
+    },
+    {
+      "filename": "6e95f36cf35ecd6d.mp3",
+      "relative_path": "6e95f36cf35ecd6d.mp3",
+      "file_size_mb": 2.23,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 194.95,
+          "total_samples": 8597376
+        },
+        "rhythm": {
+          "tempo_bpm": 99.38,
+          "num_beats_detected": 280,
+          "avg_onset_strength": 0.764
+        },
+        "tonal": {
+          "estimated_key": "B major",
+          "key_confidence": 0.8507
+        }
+      },
+      "human_analysis": {
+        "genre": "Ambient, New Age",
+        "mood": "Calm, serene, and meditative",
+        "energy_level": "low",
+        "instruments_detected": [
+          "flute",
+          "soft strings",
+          "synth pads"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and calming ambient piece, featuring soft flute and lush synth pads.",
+        "suitable_use_cases": [
+          "meditation",
+          "relaxation",
+          "yoga",
+          "background music for reading or studying"
+        ],
+        "similar_artists_or_styles": [
+          "Enya",
+          "Brian Eno",
+          "Kitaro"
+        ],
+        "production_style": "polished and atmospheric",
+        "tempo_feel": "a slow, flowing rhythm that feels like a gentle, natural pulse"
+      }
+    },
+    {
+      "filename": "7720abdeec943f45.mp3",
+      "relative_path": "7720abdeec943f45.mp3",
+      "file_size_mb": 3.36,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 293.41,
+          "total_samples": 12939264
+        },
+        "rhythm": {
+          "tempo_bpm": 178.21,
+          "num_beats_detected": 733,
+          "avg_onset_strength": 1.0965
+        },
+        "tonal": {
+          "estimated_key": "C# major",
+          "key_confidence": 0.8496
+        }
+      },
+      "human_analysis": {
+        "genre": "World music with elements of traditional Middle Eastern or North African folk",
+        "mood": "mystical and contemplative",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "oud",
+          "flute",
+          "hand percussion",
+          "strings"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and atmospheric instrumental piece that blends traditional Middle Eastern instrumentation.",
+        "suitable_use_cases": [
+          "meditation",
+          "relaxation",
+          "film score",
+          "background music for reading"
+        ],
+        "similar_artists_or_styles": [
+          "Anouar Brahem",
+          "Naseer Shamma",
+          "Dead Can Dance"
+        ],
+        "production_style": "polished and atmospheric",
+        "tempo_feel": "steady and flowing, with a gentle, hypnotic groove"
+      }
+    },
+    {
+      "filename": "7e28c8c11d4d786f.mp3",
+      "relative_path": "7e28c8c11d4d786f.mp3",
+      "file_size_mb": 5.26,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 459.7,
+          "total_samples": 20272896
+        },
+        "rhythm": {
+          "tempo_bpm": 114.84,
+          "num_beats_detected": 875,
+          "avg_onset_strength": 0.3244
+        },
+        "tonal": {
+          "estimated_key": "B major",
+          "key_confidence": 0.594
+        }
+      },
+      "human_analysis": {
+        "genre": "Traditional Indian, Classical",
+        "mood": "Calm, meditative, and serene",
+        "energy_level": "low",
+        "instruments_detected": [
+          "sitar",
+          "tabla",
+          "tanpura"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is a serene and meditative Indian classical piece featuring the sitar and tabla.",
+        "suitable_use_cases": [
+          "meditation",
+          "study",
+          "relaxation",
+          "yoga"
+        ],
+        "similar_artists_or_styles": [
+          "Ravi Shankar",
+          "Anoushka Shankar",
+          "Ali Akbar Khan"
+        ],
+        "production_style": "polished, live recording with a natural acoustic ambiance",
+        "tempo_feel": "laid-back groove, with a gradual increase in tempo"
+      }
+    },
+    {
+      "filename": "815e0a7b0e8d1aa294d501b08ce9f6bf.mp3",
+      "relative_path": "815e0a7b0e8d1aa294d501b08ce9f6bf.mp3",
+      "file_size_mb": 1.01,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 87.95,
+          "total_samples": 3878784
+        },
+        "rhythm": {
+          "tempo_bpm": 129.2,
+          "num_beats_detected": 168,
+          "avg_onset_strength": 0.8409
+        },
+        "tonal": {
+          "estimated_key": "C# minor",
+          "key_confidence": 0.7348
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical Indian, specifically Hindustani classical",
+        "mood": "Calm, meditative, and introspective",
+        "energy_level": "Low",
+        "instruments_detected": [
+          "sitar",
+          "tanpura",
+          "tabla"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and meditative piece of Hindustani classical music.",
+        "suitable_use_cases": [
+          "meditation",
+          "relaxation",
+          "study",
+          "yoga",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Ravi Shankar",
+          "Nikhil Banerjee",
+          "Vilayat Khan"
+        ],
+        "production_style": "Natural and live, with a warm, organic sound",
+        "tempo_feel": "slow and flowing, relaxed and meditative"
+      }
+    },
+    {
+      "filename": "81e93132df81c2a7.mp3",
+      "relative_path": "81e93132df81c2a7.mp3",
+      "file_size_mb": 1.51,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 131.66,
+          "total_samples": 5806080
+        },
+        "rhythm": {
+          "tempo_bpm": 109.96,
+          "num_beats_detected": 218,
+          "avg_onset_strength": 1.3036
+        },
+        "tonal": {
+          "estimated_key": "G major",
+          "key_confidence": 0.7723
+        }
+      },
+      "human_analysis": {
+        "genre": "World music with elements of traditional folk and ambient",
+        "mood": "calm and reflective",
+        "energy_level": "low",
+        "instruments_detected": [
+          "flute",
+          "hand percussion",
+          "string instrument",
+          "ambient synthesizers"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is a serene and atmospheric instrumental track that blends traditional world music elements.",
+        "suitable_use_cases": [
+          "meditation",
+          "yoga",
+          "relaxation",
+          "background music for reading"
+        ],
+        "similar_artists_or_styles": [
+          "Dead Can Dance",
+          "Anoushka Shankar",
+          "Deep Forest"
+        ],
+        "production_style": "polished and atmospheric with a focus on natural acoustic textures",
+        "tempo_feel": "laid-back groove"
+      }
+    },
+    {
+      "filename": "96965edec3829156f4e685a57065ed8b.mp3",
+      "relative_path": "96965edec3829156f4e685a57065ed8b.mp3",
+      "file_size_mb": 1.87,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 162.98,
+          "total_samples": 7187328
+        },
+        "rhythm": {
+          "tempo_bpm": 161.5,
+          "num_beats_detected": 415,
+          "avg_onset_strength": 1.2461
+        },
+        "tonal": {
+          "estimated_key": "D major",
+          "key_confidence": 0.6669
+        }
+      },
+      "human_analysis": {
+        "genre": "World music, with strong influences of Middle Eastern or Mediterranean folk",
+        "mood": "warm, contemplative, and slightly nostalgic",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "oud",
+          "violin",
+          "hand percussion",
+          "flute"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is a beautifully crafted instrumental piece blending Middle Eastern folk traditions.",
+        "suitable_use_cases": [
+          "study",
+          "relaxation",
+          "meditation",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Anouar Brahem",
+          "Le Trio Joubran",
+          "Ravi Shankar"
+        ],
+        "production_style": "polished and well-produced, with a live acoustic feel",
+        "tempo_feel": "laid-back groove with a gentle, flowing rhythm"
+      }
+    },
+    {
+      "filename": "BRAZILIAN_LIFE_y_bourdin_HIBOU537_LC06881.mp3",
+      "relative_path": "BRAZILIAN_LIFE_y_bourdin_HIBOU537_LC06881.mp3",
+      "file_size_mb": 1.14,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 29.84,
+          "total_samples": 1315840
+        },
+        "rhythm": {
+          "tempo_bpm": 120.19,
+          "num_beats_detected": 57,
+          "avg_onset_strength": 1.2511
+        },
+        "tonal": {
+          "estimated_key": "G major",
+          "key_confidence": 0.8454
+        }
+      },
+      "human_analysis": {
+        "genre": "Latin, Salsa",
+        "mood": "upbeat and festive",
+        "energy_level": "high",
+        "instruments_detected": [
+          "trumpet",
+          "trombone",
+          "piano",
+          "percussion",
+          "bass",
+          "congas"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a high-energy salsa instrumental with vibrant brass sections.",
+        "suitable_use_cases": [
+          "dance parties",
+          "festive gatherings",
+          "background music for lively events"
+        ],
+        "similar_artists_or_styles": [
+          "Tito Puente",
+          "Fania All-Stars",
+          "Eddie Palmieri"
+        ],
+        "production_style": "polished and studio-produced",
+        "tempo_feel": "driving and danceable beat"
+      }
+    },
+    {
+      "filename": "Background Blues - Guitar Background Music.wav",
+      "relative_path": "Background Blues - Guitar Background Music.wav",
+      "file_size_mb": 46.36,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 275.57,
+          "total_samples": 12152832
+        },
+        "rhythm": {
+          "tempo_bpm": 90.67,
+          "num_beats_detected": 407,
+          "avg_onset_strength": 1.1741
+        },
+        "tonal": {
+          "estimated_key": "E major",
+          "key_confidence": 0.8334
+        }
+      },
+      "human_analysis": {
+        "error": "File too large (46.4 MB). Max is 24 MB."
+      }
+    },
+    {
+      "filename": "ES_Dancing Fingers - Palace on Wheels.mp3",
+      "relative_path": "ES_Dancing Fingers - Palace on Wheels.mp3",
+      "file_size_mb": 8.89,
+      "technical": {
+        "file_info": {
+          "sample_rate": 48000,
+          "duration_seconds": 232.61,
+          "total_samples": 11165351
+        },
+        "rhythm": {
+          "tempo_bpm": 108.17,
+          "num_beats_detected": 359,
+          "avg_onset_strength": 1.1754
+        },
+        "tonal": {
+          "estimated_key": "D major",
+          "key_confidence": 0.574
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical with strong influences of traditional Indian music",
+        "mood": "Serene and meditative with a touch of introspection",
+        "energy_level": "low",
+        "instruments_detected": [
+          "sitar",
+          "tabla",
+          "tanpura"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and meditative piece of Indian classical music.",
+        "suitable_use_cases": [
+          "meditation",
+          "study",
+          "yoga",
+          "relaxation",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Ravi Shankar",
+          "Anoushka Shankar",
+          "Ali Akbar Khan"
+        ],
+        "production_style": "polished but retains a live, organic feel",
+        "tempo_feel": "relaxed and flowing, with a gentle and cyclical tempo"
+      }
+    },
+    {
+      "filename": "FRANCE_ACCORDION_A_g_gesina_HIBOU537_LC06881.mp3",
+      "relative_path": "FRANCE_ACCORDION_A_g_gesina_HIBOU537_LC06881.mp3",
+      "file_size_mb": 0.67,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 29.26,
+          "total_samples": 1290241
+        },
+        "rhythm": {
+          "tempo_bpm": 109.96,
+          "num_beats_detected": 48,
+          "avg_onset_strength": 1.1905
+        },
+        "tonal": {
+          "estimated_key": "C# major",
+          "key_confidence": 0.7502
+        }
+      },
+      "human_analysis": {
+        "genre": "Traditional folk, possibly European or Mediterranean folk",
+        "mood": "Cheerful and festive",
+        "energy_level": "Medium",
+        "instruments_detected": [
+          "accordion",
+          "flute",
+          "percussion",
+          "strings"
+        ],
+        "vocal_description": "Instrumental",
+        "brief_description": "This track is a lively and cheerful folk instrumental, featuring accordion, flute, and strings.",
+        "suitable_use_cases": [
+          "festive gatherings",
+          "traditional dance events",
+          "background music for cultural events"
+        ],
+        "similar_artists_or_styles": [
+          "traditional European folk bands",
+          "Mediterranean folk ensembles"
+        ],
+        "production_style": "Polished but with a live, organic feel",
+        "tempo_feel": "Lively and upbeat with a danceable rhythm"
+      }
+    },
+    {
+      "filename": "HAPPY BED.wav",
+      "relative_path": "HAPPY BED.wav",
+      "file_size_mb": 20.38,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 121.15,
+          "total_samples": 5342865
+        },
+        "rhythm": {
+          "tempo_bpm": 105.47,
+          "num_beats_detected": 206,
+          "avg_onset_strength": 1.295
+        },
+        "tonal": {
+          "estimated_key": "E major",
+          "key_confidence": 0.7332
+        }
+      },
+      "human_analysis": {
+        "genre": "80s pop, synth-pop",
+        "mood": "upbeat and nostalgic",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "synthesizers",
+          "drum machine",
+          "electric guitar",
+          "bass guitar"
+        ],
+        "vocal_description": "male vocals, smooth and melodic, English language",
+        "brief_description": "This track is a nostalgic 80s-inspired pop song featuring smooth male vocals and catchy synthesizer melodies.",
+        "suitable_use_cases": [
+          "retro-themed parties",
+          "driving",
+          "background music for casual settings"
+        ],
+        "similar_artists_or_styles": [
+          "Duran Duran",
+          "A-ha",
+          "Tears for Fears"
+        ],
+        "production_style": "polished, 80s-style electronic production with a retro feel",
+        "tempo_feel": "steady, driving beat with a danceable groove"
+      }
+    },
+    {
+      "filename": "HAPPY_IN_GREECE_B_g_shess_HIBOU537_LC06881.mp3",
+      "relative_path": "HAPPY_IN_GREECE_B_g_shess_HIBOU537_LC06881.mp3",
+      "file_size_mb": 0.7,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 30.67,
+          "total_samples": 1352685
+        },
+        "rhythm": {
+          "tempo_bpm": 143.55,
+          "num_beats_detected": 66,
+          "avg_onset_strength": 1.2557
+        },
+        "tonal": {
+          "estimated_key": "G major",
+          "key_confidence": 0.6523
+        }
+      },
+      "human_analysis": {
+        "genre": "Children's music, nursery rhyme",
+        "mood": "cheerful and playful",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "xylophone",
+          "synthesizer",
+          "percussion"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a cheerful and playful instrumental piece, likely intended for children.",
+        "suitable_use_cases": [
+          "children's videos",
+          "educational content",
+          "background music for playful activities"
+        ],
+        "similar_artists_or_styles": [
+          "traditional nursery rhymes",
+          "children's educational music"
+        ],
+        "production_style": "polished and digital, likely created with electronic instruments",
+        "tempo_feel": "upbeat and bouncy"
+      }
+    },
+    {
+      "filename": "HAPPY_NOW_y_bourdin_HIBOU537_LC06881.mp3",
+      "relative_path": "HAPPY_NOW_y_bourdin_HIBOU537_LC06881.mp3",
+      "file_size_mb": 0.73,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 31.73,
+          "total_samples": 1399319
+        },
+        "rhythm": {
+          "tempo_bpm": 107.67,
+          "num_beats_detected": 54,
+          "avg_onset_strength": 1.3478
+        },
+        "tonal": {
+          "estimated_key": "C major",
+          "key_confidence": 0.6528
+        }
+      },
+      "human_analysis": {
+        "genre": "Jazz, Smooth Jazz",
+        "mood": "relaxed, mellow, and soothing",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "piano",
+          "double bass",
+          "drums",
+          "saxophone"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is a smooth jazz track featuring a mellow saxophone lead.",
+        "suitable_use_cases": [
+          "relaxation",
+          "background music for studying or working",
+          "dinner parties"
+        ],
+        "similar_artists_or_styles": [
+          "Kenny G",
+          "Dave Brubeck",
+          "Grover Washington Jr."
+        ],
+        "production_style": "polished, studio recording",
+        "tempo_feel": "laid-back groove"
+      }
+    },
+    {
+      "filename": "Happy Party Background Music For Videos - No Copyright - Party Time by Dj-VipFlash.mp3",
+      "relative_path": "Happy Party Background Music For Videos - No Copyright - Party Time by Dj-VipFlash.mp3",
+      "file_size_mb": 3.77,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 164.5,
+          "total_samples": 7254464
+        },
+        "rhythm": {
+          "tempo_bpm": 120.19,
+          "num_beats_detected": 294,
+          "avg_onset_strength": 1.1497
+        },
+        "tonal": {
+          "estimated_key": "F minor",
+          "key_confidence": 0.4094
+        }
+      },
+      "human_analysis": {
+        "genre": "Electronic, Synthwave",
+        "mood": "uplifting and nostalgic",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "synthesizers",
+          "drum machine",
+          "bass"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a synthwave instrumental with a nostalgic, retro-futuristic vibe.",
+        "suitable_use_cases": [
+          "driving",
+          "study",
+          "background music for retro-themed media",
+          "workout"
+        ],
+        "similar_artists_or_styles": [
+          "Kavinsky",
+          "Com Truise",
+          "Daft Punk (Tron-era)"
+        ],
+        "production_style": "polished, electronic, retro-inspired",
+        "tempo_feel": "steady, driving beat with a retro, laid-back groove"
+      }
+    },
+    {
+      "filename": "JOVIAL_WORLD_A_y_bourdin_HIBOU537_LC06881.mp3",
+      "relative_path": "JOVIAL_WORLD_A_y_bourdin_HIBOU537_LC06881.mp3",
+      "file_size_mb": 1.11,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 29.1,
+          "total_samples": 1283122
+        },
+        "rhythm": {
+          "tempo_bpm": 105.47,
+          "num_beats_detected": 46,
+          "avg_onset_strength": 1.1774
+        },
+        "tonal": {
+          "estimated_key": "G major",
+          "key_confidence": 0.8587
+        }
+      },
+      "human_analysis": {
+        "genre": "Big Band Jazz, Swing",
+        "mood": "upbeat, joyful, and celebratory",
+        "energy_level": "high",
+        "instruments_detected": [
+          "trumpet",
+          "trombone",
+          "saxophone",
+          "drums",
+          "double bass",
+          "piano"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a high-energy, joyful big band jazz piece with a swinging rhythm.",
+        "suitable_use_cases": [
+          "dance parties",
+          "retro-themed events",
+          "background music for lively gatherings"
+        ],
+        "similar_artists_or_styles": [
+          "Glenn Miller",
+          "Duke Ellington",
+          "Count Basie"
+        ],
+        "production_style": "polished, studio-recorded with a classic big band sound",
+        "tempo_feel": "driving, swinging beat with a fast tempo"
+      }
+    },
+    {
+      "filename": "Kashmiri Theme Music.mp3",
+      "relative_path": "Kashmiri Theme Music.mp3",
+      "file_size_mb": 7.33,
+      "technical": {
+        "file_info": {
+          "sample_rate": 48000,
+          "duration_seconds": 320.09,
+          "total_samples": 15364271
+        },
+        "rhythm": {
+          "tempo_bpm": 100.45,
+          "num_beats_detected": 507,
+          "avg_onset_strength": 1.0541
+        },
+        "tonal": {
+          "estimated_key": "A minor",
+          "key_confidence": 0.762
+        }
+      },
+      "human_analysis": {
+        "genre": "Indian classical with folk influences",
+        "mood": "serene and meditative",
+        "energy_level": "low",
+        "instruments_detected": [
+          "sitar",
+          "tabla",
+          "tanpura"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a calming Indian classical instrumental piece featuring the sitar and tabla.",
+        "suitable_use_cases": [
+          "meditation",
+          "relaxation",
+          "yoga",
+          "background for studying"
+        ],
+        "similar_artists_or_styles": [
+          "Ravi Shankar",
+          "Anoushka Shankar",
+          "classical Indian ragas"
+        ],
+        "production_style": "live and organic",
+        "tempo_feel": "laid-back and flowing"
+      }
+    },
+    {
+      "filename": "LIVING_SHOW_A_g_gesina_HIB147_LC06881.mp3",
+      "relative_path": "LIVING_SHOW_A_g_gesina_HIB147_LC06881.mp3",
+      "file_size_mb": 0.67,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 29.16,
+          "total_samples": 1286144
+        },
+        "rhythm": {
+          "tempo_bpm": 93.96,
+          "num_beats_detected": 42,
+          "avg_onset_strength": 1.1239
+        },
+        "tonal": {
+          "estimated_key": "F# major",
+          "key_confidence": 0.6996
+        }
+      },
+      "human_analysis": {
+        "genre": "Big Band Jazz, Swing",
+        "mood": "upbeat, lively, celebratory",
+        "energy_level": "high",
+        "instruments_detected": [
+          "trumpet",
+          "trombone",
+          "saxophone",
+          "drums",
+          "double bass",
+          "piano"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a lively and energetic big band jazz piece with a fast swing rhythm.",
+        "suitable_use_cases": [
+          "dance parties",
+          "vintage-themed events",
+          "film score for period pieces"
+        ],
+        "similar_artists_or_styles": [
+          "Glenn Miller",
+          "Duke Ellington",
+          "Count Basie"
+        ],
+        "production_style": "polished, studio-quality big band recording",
+        "tempo_feel": "driving, fast-paced swing rhythm"
+      }
+    },
+    {
+      "filename": "Most Happy Background Music For Videos.mp3",
+      "relative_path": "Most Happy Background Music For Videos.mp3",
+      "file_size_mb": 2.87,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 125.23,
+          "total_samples": 5522432
+        },
+        "rhythm": {
+          "tempo_bpm": 74.9,
+          "num_beats_detected": 149,
+          "avg_onset_strength": 1.1226
+        },
+        "tonal": {
+          "estimated_key": "A# major",
+          "key_confidence": 0.8188
+        }
+      },
+      "human_analysis": {
+        "genre": "Pop with elements of acoustic and folk",
+        "mood": "Cheerful and lighthearted",
+        "energy_level": "Medium",
+        "instruments_detected": [
+          "acoustic guitar",
+          "hand claps",
+          "light percussion"
+        ],
+        "vocal_description": "Instrumental",
+        "brief_description": "This is a cheerful, upbeat acoustic track with a light and bouncy feel.",
+        "suitable_use_cases": [
+          "background music",
+          "study",
+          "casual gatherings",
+          "advertisements"
+        ],
+        "similar_artists_or_styles": [
+          "Jason Mraz",
+          "Jack Johnson",
+          "Acoustic pop"
+        ],
+        "production_style": "Polished and clean with a bright, acoustic feel",
+        "tempo_feel": "Upbeat and bouncy with a steady, easy-going rhythm"
+      }
+    },
+    {
+      "filename": "NEW BED.mp3",
+      "relative_path": "NEW BED.mp3",
+      "file_size_mb": 2.35,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 153.74,
+          "total_samples": 6780079
+        },
+        "rhythm": {
+          "tempo_bpm": 152.0,
+          "num_beats_detected": 388,
+          "avg_onset_strength": 1.647
+        },
+        "tonal": {
+          "estimated_key": "G# minor",
+          "key_confidence": 0.3312
+        }
+      },
+      "human_analysis": {
+        "genre": "Jazz, with elements of swing and big band",
+        "mood": "upbeat and lively",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "trumpet",
+          "saxophone",
+          "drums",
+          "double bass",
+          "piano"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is an upbeat jazz track with a swinging groove.",
+        "suitable_use_cases": [
+          "cocktail party",
+          "background music for a classy event",
+          "study",
+          "relaxation"
+        ],
+        "similar_artists_or_styles": [
+          "Duke Ellington",
+          "Count Basie",
+          "Benny Goodman"
+        ],
+        "production_style": "polished, live studio recording",
+        "tempo_feel": "swinging groove with a steady, moderate tempo"
+      }
+    },
+    {
+      "filename": "NEWYEAR MUSIC BEDS.mp3",
+      "relative_path": "NEWYEAR MUSIC BEDS.mp3",
+      "file_size_mb": 0.98,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 64.05,
+          "total_samples": 2824704
+        },
+        "rhythm": {
+          "tempo_bpm": 90.67,
+          "num_beats_detected": 92,
+          "avg_onset_strength": 1.2725
+        },
+        "tonal": {
+          "estimated_key": "F major",
+          "key_confidence": 0.8096
+        }
+      },
+      "human_analysis": {
+        "genre": "Jazz, Swing",
+        "mood": "upbeat and playful",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "trumpet",
+          "saxophone",
+          "trombone",
+          "double bass",
+          "drums",
+          "piano"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a lively and upbeat swing jazz piece.",
+        "suitable_use_cases": [
+          "dance parties",
+          "retro-themed events",
+          "background music for lively gatherings"
+        ],
+        "similar_artists_or_styles": [
+          "Duke Ellington",
+          "Count Basie",
+          "Benny Goodman"
+        ],
+        "production_style": "polished, live band recording",
+        "tempo_feel": "driving, swinging beat with a steady, danceable rhythm"
+      }
+    },
+    {
+      "filename": "No Copyright Music Vibe Tracks - About That Oldie (YouTube Audio Library).mp3",
+      "relative_path": "No Copyright Music Vibe Tracks - About That Oldie (YouTube Audio Library).mp3",
+      "file_size_mb": 2.61,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 114.01,
+          "total_samples": 5027840
+        },
+        "rhythm": {
+          "tempo_bpm": 139.67,
+          "num_beats_detected": 254,
+          "avg_onset_strength": 1.1586
+        },
+        "tonal": {
+          "estimated_key": "C major",
+          "key_confidence": 0.7839
+        }
+      },
+      "human_analysis": {
+        "genre": "Pop with electronic dance influences",
+        "mood": "Upbeat and cheerful",
+        "energy_level": "high",
+        "instruments_detected": [
+          "synthesizers",
+          "drums",
+          "bass",
+          "claps"
+        ],
+        "vocal_description": "female vocals, bright and energetic, English language",
+        "brief_description": "This track is an energetic pop song with electronic dance influences.",
+        "suitable_use_cases": [
+          "party",
+          "workout",
+          "driving",
+          "background music for upbeat environments"
+        ],
+        "similar_artists_or_styles": [
+          "Katy Perry",
+          "Dua Lipa",
+          "Ava Max"
+        ],
+        "production_style": "polished and electronic with a radio-friendly mix",
+        "tempo_feel": "driving beat with a danceable rhythm"
+      }
+    },
+    {
+      "filename": "Reflections of Sunderban.mp3",
+      "relative_path": "Reflections of Sunderban.mp3",
+      "file_size_mb": 3.79,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 331.18,
+          "total_samples": 14605056
+        },
+        "rhythm": {
+          "tempo_bpm": 136.0,
+          "num_beats_detected": 725,
+          "avg_onset_strength": 1.0615
+        },
+        "tonal": {
+          "estimated_key": "A minor",
+          "key_confidence": 0.6135
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical Indian, Hindustani classical",
+        "mood": "meditative, serene, and introspective",
+        "energy_level": "low",
+        "instruments_detected": [
+          "sitar",
+          "tabla",
+          "violin or sarangi",
+          "tanpura"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is a serene and meditative Hindustani classical instrumental piece.",
+        "suitable_use_cases": [
+          "meditation",
+          "relaxation",
+          "study",
+          "yoga",
+          "background music"
+        ],
+        "similar_artists_or_styles": [
+          "Ravi Shankar",
+          "Ali Akbar Khan",
+          "Nikhil Banerjee"
+        ],
+        "production_style": "live and organic, with a natural acoustic ambiance",
+        "tempo_feel": "free-form at the start, transitioning into a gentle, steady rhythmic cycle"
+      }
+    },
+    {
+      "filename": "Sweet Mary 44k.wav",
+      "relative_path": "Sweet Mary 44k.wav",
+      "file_size_mb": 26.04,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 154.78,
+          "total_samples": 6825725
+        },
+        "rhythm": {
+          "tempo_bpm": 126.05,
+          "num_beats_detected": 313,
+          "avg_onset_strength": 0.9407
+        },
+        "tonal": {
+          "estimated_key": "D major",
+          "key_confidence": 0.9342
+        }
+      },
+      "human_analysis": {
+        "error": "File too large (26.0 MB). Max is 24 MB."
+      }
+    },
+    {
+      "filename": "We Are Here - Declan DP [Vlog No Copyright Music].mp3",
+      "relative_path": "We Are Here - Declan DP [Vlog No Copyright Music].mp3",
+      "file_size_mb": 4.01,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 175.31,
+          "total_samples": 7731200
+        },
+        "rhythm": {
+          "tempo_bpm": 129.2,
+          "num_beats_detected": 371,
+          "avg_onset_strength": 1.1373
+        },
+        "tonal": {
+          "estimated_key": "C major",
+          "key_confidence": 0.8049
+        }
+      },
+      "human_analysis": {
+        "genre": "Electronic, Dance",
+        "mood": "uplifting and energetic",
+        "energy_level": "high",
+        "instruments_detected": [
+          "synthesizers",
+          "drum machine",
+          "bass",
+          "electronic percussion"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is a high-energy electronic dance track with a driving beat and uplifting synth melodies.",
+        "suitable_use_cases": [
+          "party",
+          "workout",
+          "dance events",
+          "festivals"
+        ],
+        "similar_artists_or_styles": [
+          "Avicii",
+          "Calvin Harris",
+          "David Guetta"
+        ],
+        "production_style": "polished and electronic, with a clean, modern production",
+        "tempo_feel": "driving beat with a steady, fast-paced rhythm"
+      }
+    },
+    {
+      "filename": "a1afdae04cdfa0a525d68229c5e1198f.mp3",
+      "relative_path": "a1afdae04cdfa0a525d68229c5e1198f.mp3",
+      "file_size_mb": 2.39,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 208.85,
+          "total_samples": 9210240
+        },
+        "rhythm": {
+          "tempo_bpm": 139.67,
+          "num_beats_detected": 465,
+          "avg_onset_strength": 1.1167
+        },
+        "tonal": {
+          "estimated_key": "D# minor",
+          "key_confidence": 0.792
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical with elements of traditional Indian music",
+        "mood": "serene, meditative, and uplifting",
+        "energy_level": "low",
+        "instruments_detected": [
+          "sitar",
+          "tabla",
+          "flute",
+          "strings"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene blend of classical Indian instrumentation.",
+        "suitable_use_cases": [
+          "meditation",
+          "yoga",
+          "study",
+          "relaxation",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Ravi Shankar",
+          "Anoushka Shankar",
+          "Pandit Hariprasad Chaurasia"
+        ],
+        "production_style": "polished and well-produced, with a focus on natural acoustic sounds",
+        "tempo_feel": "laid-back and flowing, with a gentle rhythmic pulse"
+      }
+    },
+    {
+      "filename": "bed_2_happy - Sep 11, 2005 04.00.12.mp3",
+      "relative_path": "bed_2_happy - Sep 11, 2005 04.00.12.mp3",
+      "file_size_mb": 1.15,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 30.27,
+          "total_samples": 1335037
+        },
+        "rhythm": {
+          "tempo_bpm": 136.0,
+          "num_beats_detected": 64,
+          "avg_onset_strength": 2.1832
+        },
+        "tonal": {
+          "estimated_key": "D minor",
+          "key_confidence": 0.5952
+        }
+      },
+      "human_analysis": {
+        "genre": "Electronic, Synthwave",
+        "mood": "futuristic and energetic with a slightly nostalgic undertone",
+        "energy_level": "high",
+        "instruments_detected": [
+          "synthesizers",
+          "drum machine",
+          "bass synth"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a high-energy synthwave piece with a driving beat and polished production.",
+        "suitable_use_cases": [
+          "driving",
+          "workout",
+          "video game soundtrack",
+          "sci-fi film score"
+        ],
+        "similar_artists_or_styles": [
+          "Kavinsky",
+          "Perturbator",
+          "Carpenter Brut"
+        ],
+        "production_style": "polished and electronic with a retro-futuristic aesthetic",
+        "tempo_feel": "driving beat with a steady, pulsating rhythm"
+      }
+    },
+    {
+      "filename": "bensound-jazzyfrenchy.mp3",
+      "relative_path": "bensound-jazzyfrenchy.mp3",
+      "file_size_mb": 1.4,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 104.74,
+          "total_samples": 4619192
+        },
+        "rhythm": {
+          "tempo_bpm": 114.84,
+          "num_beats_detected": 192,
+          "avg_onset_strength": 1.568
+        },
+        "tonal": {
+          "estimated_key": "D minor",
+          "key_confidence": 0.4305
+        }
+      },
+      "human_analysis": {
+        "genre": "Electronic, Synthwave",
+        "mood": "uplifting, nostalgic",
+        "energy_level": "medium",
+        "instruments_detected": [
+          "synthesizers",
+          "drum machine",
+          "bass"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a polished electronic piece with a nostalgic synthwave vibe.",
+        "suitable_use_cases": [
+          "driving",
+          "studying",
+          "background music for work",
+          "retro-themed parties"
+        ],
+        "similar_artists_or_styles": [
+          "Kavinsky",
+          "Daft Punk",
+          "Com Truise"
+        ],
+        "production_style": "polished, electronic, retro-inspired",
+        "tempo_feel": "steady, driving beat with a retro, laid-back groove"
+      }
+    },
+    {
+      "filename": "cce0db5b355b2ddad33b15438f399c19.mp3",
+      "relative_path": "cce0db5b355b2ddad33b15438f399c19.mp3",
+      "file_size_mb": 1.39,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 121.36,
+          "total_samples": 5352192
+        },
+        "rhythm": {
+          "tempo_bpm": 156.61,
+          "num_beats_detected": 289,
+          "avg_onset_strength": 0.7777
+        },
+        "tonal": {
+          "estimated_key": "D major",
+          "key_confidence": 0.8115
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical with elements of traditional or folk music",
+        "mood": "Calm, serene, and reflective",
+        "energy_level": "low",
+        "instruments_detected": [
+          "violin",
+          "flute",
+          "harp",
+          "possibly a string ensemble"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This is a serene and reflective instrumental track featuring classical and folk elements.",
+        "suitable_use_cases": [
+          "meditation",
+          "study",
+          "relaxation",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Yo-Yo Ma",
+          "Ludovico Einaudi",
+          "traditional folk ensembles"
+        ],
+        "production_style": "polished and acoustic, with a focus on natural instrument tones",
+        "tempo_feel": "slow and flowing, with a gentle and soothing rhythm"
+      }
+    },
+    {
+      "filename": "d7891cca46183056.mp3",
+      "relative_path": "d7891cca46183056.mp3",
+      "file_size_mb": 1.86,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 162.77,
+          "total_samples": 7178112
+        },
+        "rhythm": {
+          "tempo_bpm": 152.0,
+          "num_beats_detected": 389,
+          "avg_onset_strength": 1.5315
+        },
+        "tonal": {
+          "estimated_key": "D# major",
+          "key_confidence": 0.7826
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical Indian, with elements of traditional folk",
+        "mood": "Serene and meditative, with a touch of melancholy",
+        "energy_level": "low",
+        "instruments_detected": [
+          "bansuri (Indian flute)",
+          "tabla",
+          "tanpura (drone instrument)"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and meditative Indian classical piece featuring a bansuri (Indian flute).",
+        "suitable_use_cases": [
+          "meditation",
+          "yoga",
+          "relaxation",
+          "study",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Hariprasad Chaurasia",
+          "Pandit Ravi Shankar"
+        ],
+        "production_style": "Live and organic, with a natural acoustic sound",
+        "tempo_feel": "free-form and meditative, transitioning to a gentle groove"
+      }
+    },
+    {
+      "filename": "devotion.mp3",
+      "relative_path": "devotion.mp3",
+      "file_size_mb": 3.04,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 132.96,
+          "total_samples": 5863680
+        },
+        "rhythm": {
+          "tempo_bpm": 206.72,
+          "num_beats_detected": 399,
+          "avg_onset_strength": 0.7168
+        },
+        "tonal": {
+          "estimated_key": "C major",
+          "key_confidence": 0.8238
+        }
+      },
+      "human_analysis": {
+        "genre": "Ambient, World Music",
+        "mood": "calm, serene, introspective",
+        "energy_level": "low",
+        "instruments_detected": [
+          "flute",
+          "strings",
+          "soft percussion",
+          "synth pads"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and calming ambient piece with world music influences.",
+        "suitable_use_cases": [
+          "meditation",
+          "yoga",
+          "study",
+          "relaxation",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Brian Eno",
+          "Enya",
+          "Kitaro",
+          "Dead Can Dance"
+        ],
+        "production_style": "polished, atmospheric, and spacious",
+        "tempo_feel": "slow, meditative, and flowing"
+      }
+    },
+    {
+      "filename": "f46cbb51e6500642.mp3",
+      "relative_path": "f46cbb51e6500642.mp3",
+      "file_size_mb": 0.87,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 75.62,
+          "total_samples": 3335040
+        },
+        "rhythm": {
+          "tempo_bpm": 147.66,
+          "num_beats_detected": 150,
+          "avg_onset_strength": 0.7864
+        },
+        "tonal": {
+          "estimated_key": "D major",
+          "key_confidence": 0.8152
+        }
+      },
+      "human_analysis": {
+        "genre": "Traditional folk with a classical influence",
+        "mood": "Serene and contemplative",
+        "energy_level": "low",
+        "instruments_detected": [
+          "flute",
+          "string instrument (possibly a sitar)",
+          "drone instrument (tanpura)"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and meditative instrumental piece, featuring a flute as the primary instrument.",
+        "suitable_use_cases": [
+          "meditation",
+          "relaxation",
+          "yoga",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Pandit Hariprasad Chaurasia",
+          "Ravi Shankar"
+        ],
+        "production_style": "live, acoustic, and natural",
+        "tempo_feel": "slow and meditative, with a free-form rhythmic feel"
+      }
+    },
+    {
+      "filename": "f5ab8c130aaa546dc4324701e6709f35.mp3",
+      "relative_path": "f5ab8c130aaa546dc4324701e6709f35.mp3",
+      "file_size_mb": 1.16,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 100.94,
+          "total_samples": 4451328
+        },
+        "rhythm": {
+          "tempo_bpm": 184.57,
+          "num_beats_detected": 290,
+          "avg_onset_strength": 0.8874
+        },
+        "tonal": {
+          "estimated_key": "G major",
+          "key_confidence": 0.7904
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical, with elements of traditional folk",
+        "mood": "Calm, serene, and reflective",
+        "energy_level": "low",
+        "instruments_detected": [
+          "flute",
+          "harp",
+          "strings (possibly violin)",
+          "soft percussion"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and reflective instrumental piece featuring flute, harp, and strings.",
+        "suitable_use_cases": [
+          "meditation",
+          "study",
+          "relaxation",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Yann Tiersen",
+          "Ludovico Einaudi"
+        ],
+        "production_style": "Polished and acoustic, with a clear and natural sound",
+        "tempo_feel": "slow and flowing, with a gentle and relaxed groove"
+      }
+    },
+    {
+      "filename": "f8f9eaa91ca7c8db18cb6cb083fd2752.mp3",
+      "relative_path": "f8f9eaa91ca7c8db18cb6cb083fd2752.mp3",
+      "file_size_mb": 2.15,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 187.82,
+          "total_samples": 8282880
+        },
+        "rhythm": {
+          "tempo_bpm": 99.38,
+          "num_beats_detected": 301,
+          "avg_onset_strength": 1.1475
+        },
+        "tonal": {
+          "estimated_key": "C# minor",
+          "key_confidence": 0.7226
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical, with elements of traditional Middle Eastern or Mediterranean folk music",
+        "mood": "Warm, nostalgic, and slightly melancholic",
+        "energy_level": "Medium",
+        "instruments_detected": [
+          "violin",
+          "oud",
+          "hand percussion",
+          "possibly a qanun"
+        ],
+        "vocal_description": "Instrumental",
+        "brief_description": "This track is a beautifully arranged instrumental piece blending classical and Middle Eastern folk traditions.",
+        "suitable_use_cases": [
+          "relaxation",
+          "background music for reading",
+          "film score",
+          "meditative moments"
+        ],
+        "similar_artists_or_styles": [
+          "Anouar Brahem",
+          "Al Di Meola",
+          "Yo-Yo Ma's Silk Road Ensemble"
+        ],
+        "production_style": "Polished, with a live acoustic feel",
+        "tempo_feel": "gentle, flowing groove with a moderate tempo"
+      }
+    },
+    {
+      "filename": "fc86d3133ab62f91d7a938faebbd01d5.mp3",
+      "relative_path": "fc86d3133ab62f91d7a938faebbd01d5.mp3",
+      "file_size_mb": 2.04,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 178.36,
+          "total_samples": 7865856
+        },
+        "rhythm": {
+          "tempo_bpm": 109.96,
+          "num_beats_detected": 310,
+          "avg_onset_strength": 1.0829
+        },
+        "tonal": {
+          "estimated_key": "G major",
+          "key_confidence": 0.7359
+        }
+      },
+      "human_analysis": {
+        "genre": "World music, with elements of traditional Indian classical and fusion",
+        "mood": "serene, meditative, and calming",
+        "energy_level": "low",
+        "instruments_detected": [
+          "sitar",
+          "tabla",
+          "flute",
+          "tanpura"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and meditative piece of Indian classical fusion.",
+        "suitable_use_cases": [
+          "meditation",
+          "yoga",
+          "relaxation",
+          "study",
+          "film score"
+        ],
+        "similar_artists_or_styles": [
+          "Ravi Shankar",
+          "Anoushka Shankar",
+          "Pandit Hariprasad Chaurasia"
+        ],
+        "production_style": "polished and clean, with a focus on natural acoustic sounds",
+        "tempo_feel": "laid-back and flowing, with a gentle rhythmic pulse"
+      }
+    },
+    {
+      "filename": "sitar raga.mp3",
+      "relative_path": "sitar raga.mp3",
+      "file_size_mb": 3.44,
+      "technical": {
+        "file_info": {
+          "sample_rate": 44100,
+          "duration_seconds": 300.36,
+          "total_samples": 13245696
+        },
+        "rhythm": {
+          "tempo_bpm": 114.84,
+          "num_beats_detected": 547,
+          "avg_onset_strength": 1.0886
+        },
+        "tonal": {
+          "estimated_key": "C# major",
+          "key_confidence": 0.7942
+        }
+      },
+      "human_analysis": {
+        "genre": "Classical Indian, specifically Hindustani classical",
+        "mood": "serene and meditative",
+        "energy_level": "low",
+        "instruments_detected": [
+          "sitar",
+          "tabla",
+          "tanpura"
+        ],
+        "vocal_description": "instrumental",
+        "brief_description": "This track is a serene and meditative piece of Hindustani classical music.",
+        "suitable_use_cases": [
+          "meditation",
+          "relaxation",
+          "study",
+          "yoga"
+        ],
+        "similar_artists_or_styles": [
+          "Ravi Shankar",
+          "Vilayat Khan",
+          "Nikhil Banerjee"
+        ],
+        "production_style": "live and organic, with a natural acoustic sound",
+        "tempo_feel": "laid-back and flowing, with a gradual build-up in rhythmic complexity"
+      }
+    }
+  ]
+}

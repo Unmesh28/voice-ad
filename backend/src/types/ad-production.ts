@@ -243,6 +243,48 @@ export interface AdProductionInput {
 }
 
 // ---------------------------------------------------------------------------
+// Music Library Selection (RAG-based music selection from pre-analyzed catalog)
+// ---------------------------------------------------------------------------
+
+/** Compact representation of a track from the pre-analyzed music catalog. */
+export interface MusicCatalogTrack {
+  filename: string;
+  relative_path: string;
+  file_size_mb: number;
+  duration_seconds: number;
+  tempo_bpm: number;
+  estimated_key: string;
+  genre?: string;
+  mood?: string;
+  energy_level?: string;
+  instruments_detected?: string[];
+  suitable_use_cases?: string[];
+  brief_description?: string;
+  cultural_context?: string;
+  similar_artists_or_styles?: string[];
+  production_style?: string;
+  tempo_feel?: string;
+}
+
+/** Result from LLM music selection (which track to use + mixing params). */
+export interface MusicSelectionResult {
+  selectedTrack: {
+    filename: string;
+    reasoning: string;
+  };
+  mixingParameters: {
+    musicVolume: number;
+    fadeInSeconds: number;
+    fadeOutSeconds: number;
+    fadeCurve: string;
+    voiceVolume: number;
+    audioDucking: boolean;
+    duckingAmount: number;
+    musicDelay: number;
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Example JSON (for LLM few-shot and validation)
 // ---------------------------------------------------------------------------
 

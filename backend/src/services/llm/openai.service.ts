@@ -1,12 +1,13 @@
 import axios from 'axios';
 import { logger } from '../../config/logger';
-import type { AdProductionInput, AdProductionLLMResponse } from '../../types/ad-production';
+import type { AdProductionInput, AdProductionLLMResponse, MusicSelectionResult } from '../../types/ad-production';
 import {
   parseAndValidateAdProductionResponse,
   getAdProductionExampleJSONString,
   getOpenAIAdProductionJsonSchema,
 } from '../../types/ad-production';
 import { getTemplateSummaryForPrompt } from '../../types/ad-format';
+import musicLibraryService from '../music/music-library.service';
 
 interface GenerateScriptParams {
   prompt: string;
@@ -445,6 +446,170 @@ Format your output as a clean, ready-to-use script without any extra commentary,
   }
 
   /**
+   * Generate ad production JSON AND select the best music track from the pre-analyzed catalog.
+   * This combines script generation + music selection in a single workflow:
+   * 1. Generate the ad script + metadata via generateAdProductionJSON()
+   * 2. Use a second LLM call to select the best music from the catalog
+   * Returns both the standard ad production response and the music selection.
+   */
+  async generateAdWithMusicSelection(
+    input: AdProductionInput
+  ): Promise<{ adProduction: AdProductionLLMResponse; musicSelection: MusicSelectionResult }> {
+    // Step 1: Generate the ad script and metadata as usual
+    const adProduction = await this.generateAdProductionJSON(input);
+
+    // Step 2: Select music from library using the generated script + context
+    const trackSummaries = musicLibraryService.getSummariesForLLM();
+
+    const systemPrompt = `You are an expert music supervisor for audio advertisements. Select the BEST background music track from this pre-analyzed music library for the given ad.
+
+AVAILABLE TRACKS:
+${trackSummaries}
+
+SELECTION CRITERIA:
+1. Match the emotional tone and energy of the ad script
+2. Appropriate tempo/BPM for the ad pace (slow ads = lower BPM tracks, fast = higher)
+3. Prefer instrumental tracks that won't overpower voiceover
+4. Fit the ad category and target audience
+5. Track duration should ideally be >= ad duration
+6. Consider cultural context if the ad targets a specific audience
+7. Do NOT stereotype by language — base choice on the ad's MESSAGE and emotion
+
+MIXING PARAMETERS:
+- musicVolume: 0.08-0.25 (lower for dense voiceover, higher for music-forward)
+- duckingAmount: 0.25-0.60 (higher = more ducking when voice plays)
+- musicDelay: 0-3s of music before voice starts (pre-roll intro)
+- fadeInSeconds: 0.05-1.0 (music fade-in)
+- fadeOutSeconds: 0.2-1.5 (music fade-out)
+
+Respond with ONLY valid JSON:
+{
+  "selectedTrack": { "filename": "exact_filename.mp3", "reasoning": "why this track" },
+  "mixingParameters": { "musicVolume": 0.15, "fadeInSeconds": 0.1, "fadeOutSeconds": 0.4, "fadeCurve": "exp", "voiceVolume": 1.0, "audioDucking": true, "duckingAmount": 0.35, "musicDelay": 1.5 }
+}`;
+
+    const userMessage = [
+      `Select background music for this ad:`,
+      ``,
+      `Brief: ${input.prompt}`,
+      `Script: ${adProduction.script}`,
+      `Tone: ${adProduction.context.tone}`,
+      `Emotion: ${adProduction.context.emotion}`,
+      `Pace: ${adProduction.context.pace}`,
+      `Category: ${adProduction.context.adCategory}`,
+      `Duration: ${adProduction.context.durationSeconds}s`,
+      `Music direction: ${adProduction.music.prompt}`,
+      `Target BPM: ${adProduction.music.targetBPM}`,
+      `Genre preference: ${adProduction.music.genre || 'any'}`,
+      `Mood preference: ${adProduction.music.mood || 'any'}`,
+      ``,
+      `Choose the best matching track and optimal mixing parameters. JSON only.`,
+    ].join('\n');
+
+    logger.info('Selecting music from library via LLM', {
+      model: this.model,
+      adCategory: adProduction.context.adCategory,
+      targetBPM: adProduction.music.targetBPM,
+    });
+
+    let musicSelection: MusicSelectionResult;
+    try {
+      const response = await axios.post(
+        this.apiUrl,
+        {
+          model: this.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage },
+          ],
+          temperature: 0.3,
+          max_tokens: 500,
+          ...(this.modelSupportsStructuredOutput()
+            ? { response_format: { type: 'json_object' } }
+            : {}),
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          timeout: 30000,
+        }
+      );
+
+      const rawContent = response.data.choices[0]?.message?.content?.trim();
+      if (!rawContent) throw new Error('No content from OpenAI for music selection');
+
+      musicSelection = this.parseMusicSelectionResponse(rawContent);
+
+      // Validate selected track exists
+      const track = musicLibraryService.getTrackByFilename(musicSelection.selectedTrack.filename);
+      if (!track) {
+        logger.warn(`LLM selected non-existent track: ${musicSelection.selectedTrack.filename}`);
+        musicSelection = this.getFallbackMusicSelection(adProduction.context.pace);
+      }
+
+      logger.info('Music selected from library', {
+        track: musicSelection.selectedTrack.filename,
+        reasoning: musicSelection.selectedTrack.reasoning,
+      });
+    } catch (error: any) {
+      logger.error('LLM music selection failed, using fallback:', { message: error.message });
+      musicSelection = this.getFallbackMusicSelection(adProduction.context.pace);
+    }
+
+    return { adProduction, musicSelection };
+  }
+
+  private parseMusicSelectionResponse(raw: string): MusicSelectionResult {
+    let content = raw.trim();
+    if (content.startsWith('```json')) content = content.replace(/^```json\s*/i, '').replace(/\s*```\s*$/, '');
+    else if (content.startsWith('```')) content = content.replace(/^```\s*/, '').replace(/\s*```\s*$/, '');
+
+    const parsed = JSON.parse(content);
+    return {
+      selectedTrack: {
+        filename: parsed.selectedTrack?.filename || '',
+        reasoning: parsed.selectedTrack?.reasoning || 'No reasoning provided',
+      },
+      mixingParameters: {
+        musicVolume: clampValue(parsed.mixingParameters?.musicVolume ?? 0.15, 0.05, 0.5),
+        fadeInSeconds: clampValue(parsed.mixingParameters?.fadeInSeconds ?? 0.1, 0.02, 2),
+        fadeOutSeconds: clampValue(parsed.mixingParameters?.fadeOutSeconds ?? 0.4, 0.1, 2),
+        fadeCurve: ['exp', 'tri', 'qsin'].includes(parsed.mixingParameters?.fadeCurve) ? parsed.mixingParameters.fadeCurve : 'exp',
+        voiceVolume: clampValue(parsed.mixingParameters?.voiceVolume ?? 1.0, 0.5, 1.5),
+        audioDucking: parsed.mixingParameters?.audioDucking !== false,
+        duckingAmount: clampValue(parsed.mixingParameters?.duckingAmount ?? 0.35, 0.1, 0.8),
+        musicDelay: clampValue(parsed.mixingParameters?.musicDelay ?? 1.0, 0, 5),
+      },
+    };
+  }
+
+  private getFallbackMusicSelection(pace?: string): MusicSelectionResult {
+    const summaries = musicLibraryService.getTrackSummaries();
+    const targetEnergy = pace === 'fast' ? 'high' : pace === 'slow' ? 'low' : 'medium';
+    let selected = summaries.find((t) => t.energy_level === targetEnergy);
+    if (!selected) selected = summaries[0];
+
+    return {
+      selectedTrack: {
+        filename: selected?.filename || 'unknown',
+        reasoning: `Fallback selection based on energy level (${targetEnergy})`,
+      },
+      mixingParameters: {
+        musicVolume: 0.15,
+        fadeInSeconds: 0.1,
+        fadeOutSeconds: 0.4,
+        fadeCurve: 'exp',
+        voiceVolume: 1.0,
+        audioDucking: true,
+        duckingAmount: 0.35,
+        musicDelay: 1.0,
+      },
+    };
+  }
+
+  /**
    * Improve/refine an existing script
    */
   async refineScript(originalScript: string, improvementRequest: string): Promise<string> {
@@ -551,6 +716,10 @@ Format your output as a clean, ready-to-use script without any extra commentary,
       throw new Error(`Failed to generate variations: ${error.message}`);
     }
   }
+}
+
+function clampValue(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 export default new OpenAIService();
