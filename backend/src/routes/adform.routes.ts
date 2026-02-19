@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import adFormBuilder from '../services/adform/adform-builder.service';
 import ttsManager from '../services/tts/tts-manager.service';
 import soundTemplateService from '../services/music/sound-template.service';
+import soundTemplateGenerator from '../services/music/sound-template-generator.service';
+import { TEMPLATE_DEFINITIONS } from '../services/music/sound-template-generator.service';
 import { validateAdForm, ADFORM_VERSION, getLoudnessValues, MASTERING_PRESETS, LOUDNESS_PRESETS, AUDIO_FORMAT_PRESETS } from '../types/adform';
 import type { AdForm, AdFormBatchRequest } from '../types/adform';
 import { logger } from '../config/logger';
@@ -271,6 +273,94 @@ router.get('/templates/search', (req: Request, res: Response) => {
       templates: results,
     },
   });
+});
+
+// ===========================================================================
+// Sound Template Generation Endpoints
+// ===========================================================================
+
+/**
+ * GET /api/adform/templates/definitions
+ *
+ * List all available template definitions that can be generated.
+ * Shows genres, moods, and template IDs without generating anything.
+ */
+router.get('/templates/definitions', (_req: Request, res: Response) => {
+  const definitions = soundTemplateGenerator.listDefinitions();
+  const genres = soundTemplateGenerator.listGenres();
+
+  // Group by genre
+  const grouped: Record<string, typeof definitions> = {};
+  for (const d of definitions) {
+    if (!grouped[d.genre]) grouped[d.genre] = [];
+    grouped[d.genre].push(d);
+  }
+
+  return res.json({
+    success: true,
+    data: {
+      totalDefinitions: definitions.length,
+      genres,
+      byGenre: grouped,
+    },
+  });
+});
+
+/**
+ * POST /api/adform/templates/generate
+ *
+ * Generate sound templates using Suno API.
+ * This calls Suno to generate intro/main/outro for each template.
+ *
+ * Body:
+ *   { genre?: string, ids?: string[], concurrency?: number }
+ *
+ * - No body = generate ALL templates
+ * - genre = generate all templates for that genre
+ * - ids = generate specific templates by ID
+ */
+router.post('/templates/generate', async (req: Request, res: Response) => {
+  try {
+    const { genre, ids, concurrency = 2 } = req.body || {};
+
+    const progressLog: any[] = [];
+    const onProgress = (p: any) => {
+      progressLog.push({ ...p, timestamp: new Date().toISOString() });
+    };
+
+    let results;
+
+    if (ids && Array.isArray(ids) && ids.length > 0) {
+      logger.info(`Template generation requested for IDs: ${ids.join(', ')}`);
+      results = await soundTemplateGenerator.generateByIds(ids, onProgress, concurrency);
+    } else if (genre) {
+      logger.info(`Template generation requested for genre: ${genre}`);
+      results = await soundTemplateGenerator.generateByGenre(genre, onProgress, concurrency);
+    } else {
+      logger.info('Template generation requested for ALL templates');
+      results = await soundTemplateGenerator.generateAll(onProgress, concurrency);
+    }
+
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
+
+    return res.json({
+      success: true,
+      data: {
+        total: results.length,
+        succeeded,
+        failed,
+        results,
+      },
+    });
+  } catch (err: any) {
+    logger.error('Template generation error:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Template generation failed',
+      error: err.message,
+    });
+  }
 });
 
 export default router;
