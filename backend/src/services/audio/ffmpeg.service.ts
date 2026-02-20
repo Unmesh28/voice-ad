@@ -230,17 +230,24 @@ class FFmpegService {
 
         // Build volume expression for the intro→bed transition
         let musicVolumeFilter: string;
-        const rampDuration = 0.5; // seconds for smooth transition
+        const rampDuration = 0.8; // longer ramp for smoother transition
+        // Pre-ramp: start music duck BEFORE voice enters so the two overlap.
+        // Without this, music drops and THEN voice appears — sounds like two
+        // separate pieces glued together. With a 0.3s head start the music is
+        // already fading as the voice comes in, creating a seamless crossfade.
+        const preRampOffset = 0.3; // seconds before voice entry to begin ducking
 
         if (voiceDelaySec > 0.1) {
-          // Voice has an intro delay: ramp from introVol → bedVol starting at voiceDelaySec
-          const rampStart = voiceDelaySec.toFixed(3);
-          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
+          // Music ramp begins preRampOffset before voice entry (clamped to 0)
+          const rampStart = Math.max(0, voiceDelaySec - preRampOffset).toFixed(3);
+          const rampEnd = (parseFloat(rampStart) + rampDuration).toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          // Before rampStart: introVol
-          // rampStart → rampEnd: linear interpolation from introVol to bedVol
-          // After rampEnd: bedVol
+          // Before rampStart: introVol (full intro level)
+          // rampStart → rampEnd: smooth ramp from introVol to bedVol
+          //   — the voice enters ~0.3s into this ramp, so music is already
+          //     partially ducked when speech begins (overlap/crossfade feel)
+          // After rampEnd: bedVol (constant bed under voice)
           musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*(t-${rampStart})/${rampDuration},${bedV}))':eval=frame`;
         } else {
           // No intro delay — voice starts immediately, music goes straight to bed level
