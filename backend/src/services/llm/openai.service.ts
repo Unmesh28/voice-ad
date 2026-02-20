@@ -32,7 +32,7 @@ class OpenAIService {
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY || '';
     this.apiUrl = 'https://api.openai.com/v1/chat/completions';
-    this.model = process.env.OPENAI_MODEL || 'gpt-4-turbo-preview';
+    this.model = process.env.OPENAI_MODEL || 'gpt-4o';
 
     if (!this.apiKey) {
       logger.warn('OpenAI API key not configured');
@@ -120,8 +120,22 @@ class OpenAIService {
     // ~2.8 words/sec at natural pace so script length matches requested duration (e.g. 30s → 84 words)
     const targetWords = Math.round(durationSeconds * 2.8);
 
-    const systemPrompt = this.buildAdProductionSystemPrompt();
+    let systemPrompt = this.buildAdProductionSystemPrompt();
     const userPrompt = this.buildAdProductionUserPrompt(input, targetWords);
+
+    // Check if prompt fits within model context window; if not, use condensed prompt
+    const contextLimit = this.getModelContextLimit();
+    let maxTokens = 2000;
+    const estimatedPromptTokens = this.estimateTokens(systemPrompt + userPrompt);
+    if (estimatedPromptTokens + maxTokens > contextLimit) {
+      logger.warn(`Prompt too large for ${this.model} (${estimatedPromptTokens} + ${maxTokens} > ${contextLimit}). Using condensed prompt.`);
+      systemPrompt = this.buildCondensedAdProductionSystemPrompt();
+      const condensedEstimate = this.estimateTokens(systemPrompt + userPrompt);
+      // Also reduce max_tokens if still tight
+      maxTokens = Math.min(maxTokens, contextLimit - condensedEstimate - 100);
+      maxTokens = Math.max(maxTokens, 1000); // never below 1000
+      logger.info(`Condensed prompt: ${condensedEstimate} tokens, max_tokens: ${maxTokens}`);
+    }
 
     const messages: OpenAIMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -134,7 +148,7 @@ class OpenAIService {
       model: this.model,
       messages,
       temperature: 0.6,
-      max_tokens: 2000,
+      max_tokens: maxTokens,
     };
     if (useStructuredOutput) {
       requestBody.response_format = {
@@ -192,6 +206,22 @@ class OpenAIService {
   private modelSupportsStructuredOutput(): boolean {
     const m = this.model.toLowerCase();
     return m.includes('gpt-4o') || m.includes('gpt-4.1') || m.includes('gpt-4.2');
+  }
+
+  /** Approximate context window for common OpenAI models. */
+  private getModelContextLimit(): number {
+    const m = this.model.toLowerCase();
+    if (m.includes('gpt-4o') || m.includes('gpt-4-turbo') || m.includes('gpt-4.1') || m.includes('gpt-4.2')) return 128000;
+    if (m.includes('gpt-4-32k')) return 32768;
+    if (m === 'gpt-4' || m.startsWith('gpt-4-0')) return 8192;
+    if (m.includes('gpt-3.5-turbo-16k')) return 16384;
+    if (m.includes('gpt-3.5')) return 4096;
+    return 128000; // default for newer models
+  }
+
+  /** Rough token estimate: ~4 chars per token for English/JSON. */
+  private estimateTokens(text: string): number {
+    return Math.ceil(text.length / 3.5);
   }
 
   private buildAdProductionSystemPrompt(): string {
@@ -320,6 +350,37 @@ TOP-LEVEL KEYS: script, context, music, fades, volume, version (optional), mixPr
 
 EXAMPLE OUTPUT (follow this structure; adapt content to the user's brief):
 ${getAdProductionExampleJSONString()}`;
+  }
+
+  /**
+   * Condensed system prompt for models with small context windows (e.g. gpt-4 8K).
+   * Strips the bulky example JSON and template summary to save ~1,500 tokens.
+   */
+  private buildCondensedAdProductionSystemPrompt(): string {
+    return `You are an expert audio ad producer. Output a single JSON object that drives the ad pipeline.
+
+RULES:
+- Respond with ONLY valid JSON. No markdown, no explanation.
+- Script: Use ElevenLabs v3 audio tags only ([happy], [excited], [pause], [whispers], etc.). No SSML.
+- Write sentences that fit musical phrasing. Place brand/CTA at sentence beginnings.
+- Music is supporting actor — voice is the star. Music sits 15-20dB below voice.
+
+REQUIRED JSON KEYS:
+1. "script" (string): Ad script with ElevenLabs tags. Word count must match duration.
+2. "context" (object): { adCategory, tone, emotion, pace, durationSeconds }
+   - adCategory: retail|automotive|tech|finance|food|healthcare|entertainment|real_estate|other
+   - pace: slow|moderate|fast
+3. "music" (object): { prompt, targetBPM (70-130), genre, mood, composerDirection (max 300 chars), instrumentation: { drums, bass, mids, effects }, arc: [2-4 segments with startSeconds, endSeconds, label, musicPrompt, targetBPM, energyLevel (1-10)] }
+   - Do NOT stereotype music by language or category. Base on message and emotion.
+   - Mids must leave 1-4kHz clear for voice.
+4. "fades" (object): { fadeInSeconds (0.08-0.12), fadeOutSeconds (0.2-0.6) }
+5. "volume" (object): { voiceVolume (0.8-1.0), musicVolume (0.1-0.25) }
+6. "adFormat" (object): { templateId, segments: [{ type, label, duration, voiceover, music, sfx, transition }] }
+   - templateId: classic_radio|cultural_hook|sfx_driven|storytelling|high_energy_sale|custom
+   - Segment types: music_solo, voiceover_with_music, sfx_hit
+   - Segment durations must sum to durationSeconds
+7. "sentenceCues" (optional): [{ index, musicCue, musicVolumeMultiplier (0.7-1.3) }]
+8. "mixPreset" (optional): "voiceProminent"|"balanced"|"musicEmotional"`;
   }
 
   private buildAdProductionUserPrompt(
