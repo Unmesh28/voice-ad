@@ -858,8 +858,8 @@ class FFmpegService {
       return this.processAudio({ filePath: inputPath }, outputPath, 'mp3');
     }
 
-    // Ramp duration at each boundary (smooth transition, no hard cuts)
-    const RAMP = 0.08;
+    // Ramp duration at each boundary (smooth gradual transition)
+    const RAMP = 0.5;
     const volumeExpr = this.buildSmoothVolumeExpression(segments, totalDuration, RAMP);
 
     return new Promise((resolve, reject) => {
