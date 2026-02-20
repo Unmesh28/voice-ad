@@ -309,30 +309,62 @@ class AdFormBuilderService {
 
     state.musicFilePath = musicOutputPath;
 
-    // Step 2: Apply voice-support EQ to music if configured
-    let processedMusicPath = musicOutputPath;
+    // Step 2: Normalize music loudness BEFORE EQ
+    // Source music varies wildly (-9 to -25 LUFS). Normalize to -18 LUFS so
+    // the EQ and volume controls work from a consistent baseline.
+    const musicNormPath = path.join(state.workDir, 'music_norm.mp3');
+    try {
+      await ffmpegService.normalizeAudioLoudness(musicOutputPath, musicNormPath, -18, -2, 7);
+    } catch {
+      // Fallback to unnormalized if normalization fails
+      logger.warn('Music loudness normalization failed, using raw music');
+    }
+    const normalizedMusicPath = fs.existsSync(musicNormPath) ? musicNormPath : musicOutputPath;
+
+    // Step 3: Apply voice-support EQ to music if configured
+    let processedMusicPath = normalizedMusicPath;
     if (config.musicSupportEQ) {
       const eqPath = path.join(state.workDir, 'music_eq.mp3');
       try {
-        await ffmpegService.applyVoiceSupportEQ(musicOutputPath, eqPath);
+        await ffmpegService.applyVoiceSupportEQ(normalizedMusicPath, eqPath);
         processedMusicPath = eqPath;
       } catch {
         // Use unprocessed music
       }
     }
 
-    // Step 3: Concatenate all speech sections into one voice track
+    // Step 4: Trim silence from individual TTS segments, then concatenate
     const voicePaths = state.ttsFiles.map((f) => f.filePath);
-    let voiceFilePath: string;
-
-    if (voicePaths.length === 1) {
-      voiceFilePath = voicePaths[0];
-    } else {
-      voiceFilePath = path.join(state.workDir, 'voice_combined.mp3');
-      await ffmpegService.concatAudioFiles(voicePaths, voiceFilePath);
+    const trimmedVoicePaths: string[] = [];
+    for (let i = 0; i < voicePaths.length; i++) {
+      const trimmedPath = path.join(state.workDir, `speech_${i}_trimmed.mp3`);
+      try {
+        await ffmpegService.trimSilence(voicePaths[i], trimmedPath, -40, 0.1);
+        trimmedVoicePaths.push(trimmedPath);
+      } catch {
+        trimmedVoicePaths.push(voicePaths[i]); // fallback to untrimmed
+      }
     }
 
-    // Step 4: Apply voice presence EQ if configured
+    let voiceFilePath: string;
+    if (trimmedVoicePaths.length === 1) {
+      voiceFilePath = trimmedVoicePaths[0];
+    } else {
+      voiceFilePath = path.join(state.workDir, 'voice_combined.mp3');
+      await ffmpegService.concatAudioFiles(trimmedVoicePaths, voiceFilePath);
+    }
+
+    // Step 5: Normalize voice loudness to -16 LUFS for consistent level
+    // TTS outputs vary by ~3 LU; normalization ensures uniform voice presence.
+    const voiceNormPath = path.join(state.workDir, 'voice_norm.mp3');
+    try {
+      await ffmpegService.normalizeAudioLoudness(voiceFilePath, voiceNormPath, -16, -2, 3);
+      voiceFilePath = voiceNormPath;
+    } catch {
+      logger.warn('Voice loudness normalization failed, using raw voice');
+    }
+
+    // Step 6: Apply voice presence EQ if configured
     if (config.voicePresenceEQ) {
       const voiceEqPath = path.join(state.workDir, 'voice_eq.mp3');
       try {
@@ -343,7 +375,7 @@ class AdFormBuilderService {
       }
     }
 
-    // Step 5: Mix voice + music
+    // Step 7: Mix voice + music
     // Fade-in: tiny anti-click. Fade-out: applied to music tail only (never eats into voice).
     const fadeIn = production.timelineProperties?.fadeIn ?? 0.05;
     const fadeOut = production.timelineProperties?.fadeOut ?? 2.0;
@@ -395,11 +427,25 @@ class AdFormBuilderService {
       });
     }
 
-    // Step 6: Apply mastering chain
+    // Step 8: Apply mastering chain
     const masteredPath = path.join(state.workDir, 'mastered.mp3');
     await masteringPresetsService.applyPreset(rawMixPath, masteredPath, masteringPreset, loudnessPreset);
 
-    state.mixedFilePath = masteredPath;
+    // Step 9: Enforce target duration (pad short outputs, trim long ones)
+    // Ensures all ads hit their target slot length exactly.
+    if (targetDuration) {
+      const enforcedPath = path.join(state.workDir, 'mastered_final.mp3');
+      try {
+        await ffmpegService.enforceDuration(masteredPath, enforcedPath, targetDuration);
+        state.mixedFilePath = enforcedPath;
+      } catch {
+        logger.warn('Duration enforcement failed, using mastered output as-is');
+        state.mixedFilePath = masteredPath;
+      }
+    } else {
+      state.mixedFilePath = masteredPath;
+    }
+
     logger.info(`Production complete: mastering="${masteringPreset}", loudness="${loudnessPreset}"`);
   }
 

@@ -100,16 +100,16 @@ export function getFormatOptions(format: AudioFormatPreset): {
     sampleRate: number;
     extension: string;
   }> = {
-    mp3:        { codec: 'libmp3lame', bitrate: '320k', channels: 2, sampleRate: 44100, extension: 'mp3' },
-    mp3_low:    { codec: 'libmp3lame', bitrate: '128k', channels: 2, sampleRate: 44100, extension: 'mp3' },
-    mp3_medium: { codec: 'libmp3lame', bitrate: '192k', channels: 2, sampleRate: 44100, extension: 'mp3' },
-    mp3_high:   { codec: 'libmp3lame', bitrate: '256k', channels: 2, sampleRate: 44100, extension: 'mp3' },
+    mp3:        { codec: 'libmp3lame', bitrate: '320k', channels: 2, sampleRate: 48000, extension: 'mp3' },
+    mp3_low:    { codec: 'libmp3lame', bitrate: '128k', channels: 2, sampleRate: 48000, extension: 'mp3' },
+    mp3_medium: { codec: 'libmp3lame', bitrate: '320k', channels: 2, sampleRate: 48000, extension: 'mp3' },
+    mp3_high:   { codec: 'libmp3lame', bitrate: '320k', channels: 2, sampleRate: 48000, extension: 'mp3' },
     wav:        { codec: 'pcm_s16le', channels: 2, sampleRate: 48000, extension: 'wav' },
     wav_44100:  { codec: 'pcm_s16le', channels: 2, sampleRate: 44100, extension: 'wav' },
-    ogg:        { codec: 'libvorbis', bitrate: '320k', channels: 2, sampleRate: 44100, extension: 'ogg' },
+    ogg:        { codec: 'libvorbis', bitrate: '320k', channels: 2, sampleRate: 48000, extension: 'ogg' },
     flac:       { codec: 'flac', channels: 2, sampleRate: 48000, extension: 'flac' },
-    aac:        { codec: 'aac', bitrate: '256k', channels: 2, sampleRate: 44100, extension: 'm4a' },
-    aac_low:    { codec: 'aac', bitrate: '128k', channels: 2, sampleRate: 44100, extension: 'm4a' },
+    aac:        { codec: 'aac', bitrate: '256k', channels: 2, sampleRate: 48000, extension: 'm4a' },
+    aac_low:    { codec: 'aac', bitrate: '128k', channels: 2, sampleRate: 48000, extension: 'm4a' },
   };
 
   return formats[format] || formats.mp3_medium;
