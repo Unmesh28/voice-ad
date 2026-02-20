@@ -164,11 +164,10 @@ class FFmpegService {
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-        // Music bed level — where music sits under voice.
-        const musicBedVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
-
-        // Intro level — barely above bed. Only ~25% drop (0.20 → 0.15).
-        const musicIntroVol = musicBedVol * 1.35;
+        // Music plays at a SINGLE constant level throughout — NO volume
+        // change when voice enters. Any perceived level difference must
+        // come from masking, not from us actually reducing the music.
+        const musicVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
@@ -218,30 +217,13 @@ class FFmpegService {
         ];
 
         // ── Music chain ─────────────────────────────────────────────
-        // Music starts at introVol (0.20), then at the SAME moment voice
-        // enters it begins a slow gradual ease-in ramp to bedVol (0.10).
-        // Only a 50% drop — subtle, not dramatic. Voice and ramp start
-        // simultaneously so the listener never hears "drop then voice".
+        // FLAT constant volume — no ramp, no intro/bed difference.
+        // The music level must not change at all when voice enters.
         const musicPad = musicDuration < mixDuration
           ? `,apad=whole_dur=${Math.ceil(mixDuration)}`
           : '';
 
-        let musicVolumeFilter: string;
-        const rampDuration = 2.0; // seconds — very gradual
-
-        if (voiceDelaySec > 0.1) {
-          const rampStart = voiceDelaySec.toFixed(3);
-          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
-          const introV = musicIntroVol.toFixed(4);
-          const bedV = musicBedVol.toFixed(4);
-          // Ease-in quadratic: starts very slow, accelerates later.
-          // Voice establishes itself before the music drop is noticeable.
-          const delta = `(${introV}-${bedV})`;
-          const p = `((t-${rampStart})/${rampDuration})`;
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-${delta}*${p}*${p},${bedV}))':eval=frame`;
-        } else {
-          musicVolumeFilter = `volume=${musicBedVol}`;
-        }
+        const musicVolumeFilter = `volume=${musicVol}`;
 
         filters.push(
           `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mduck]`,
@@ -277,8 +259,7 @@ class FFmpegService {
 
         logger.info('Professional mix settings:', {
           voiceVol,
-          musicIntroVol: musicIntroVol.toFixed(3),
-          musicBedVol: musicBedVol.toFixed(3),
+          musicVol: musicVol.toFixed(3),
           voiceDelay: `${voiceDelaySec}s`,
           voiceDuration: `${voiceTotalDuration}s`,
           musicDuration: `${musicDuration.toFixed(1)}s`,
@@ -287,7 +268,7 @@ class FFmpegService {
           fadeOut: fadeOut > 0 ? `${fadeOut}s (exp)` : 'none (no tail)',
           fadeOutStart: `${fadeOutStart}s`,
           actualTail: `${actualTail.toFixed(2)}s`,
-          approach: 'constant-bed (no sidechain)',
+          approach: 'flat-constant (no ramp, no sidechain)',
         });
 
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;
@@ -913,8 +894,10 @@ class FFmpegService {
         );
 
         if (compress) {
+          // Gentle peak-catching compression — threshold raised to avoid
+          // treating quiet sections differently from loud sections
           filterParts.push(
-            `[mixed]acompressor=threshold=-18dB:ratio=3:attack=10:release=150[compressed]`
+            `[mixed]acompressor=threshold=-8dB:ratio=1.5:attack=20:release=250[compressed]`
           );
           filterParts.push(`[compressed]alimiter=limit=-1dB:release=50[limited]`);
         } else {
@@ -923,15 +906,10 @@ class FFmpegService {
 
         const fadeOutStart = Math.max(0, duration - fadeOut);
         filterParts.push(
-          `[limited]afade=t=in:st=0:d=${fadeIn},afade=t=out:st=${fadeOutStart}:d=${fadeOut}[faded]`
+          `[limited]afade=t=in:st=0:d=${fadeIn},afade=t=out:st=${fadeOutStart}:d=${fadeOut}[out]`
         );
 
-        if (normalize) {
-          const target = Math.max(-60, Math.min(0, targetLoudness));
-          filterParts.push(`[faded]loudnorm=I=${target}:TP=-2:LRA=7[out]`);
-        } else {
-          filterParts.push(`[faded]anull[out]`);
-        }
+        // No loudnorm — inputs are already pre-normalized to consistent LUFS
 
         const filterStr = filterParts.join(';');
         command.outputOptions(['-filter_complex', filterStr, '-map', '[out]']);
@@ -1002,14 +980,12 @@ class FFmpegService {
           const rel = limiter.release ?? 50;
           filters.push(`alimiter=limit=${limit}dB:release=${rel}`);
         }
-        const target = Math.max(-60, Math.min(0, targetLoudness));
-        // linear=true: applies a SINGLE static gain to the whole file instead
-        // of dynamic adjustment. Without this, loudnorm boosts the quiet
-        // music-only intro and pulls down the louder voice+music section,
-        // making the music sound like it drops when voice enters.
-        // LRA=11: permissive loudness range so the natural intro→voice
-        // dynamic isn't squashed.
-        filters.push(`loudnorm=I=${target}:TP=-2:LRA=11:linear=true`);
+        // NO loudnorm in mastering. Loudnorm (even with linear=true) can
+        // revert to dynamic mode in single-pass when TP limiter engages,
+        // causing the music-only intro to be boosted relative to the
+        // voice+music section. Music and voice are already pre-normalized
+        // to -18 and -16 LUFS respectively before mixing, so levels are
+        // already consistent. The compressor + limiter above handle peaks.
 
         if (filters.length > 0) {
           command.audioFilters(filters);
