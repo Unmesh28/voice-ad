@@ -507,57 +507,47 @@ class TimelineComposerService {
       cursor = newDuration;
     }
 
-    // ── Resolving fade: smooth music fade-out during final voiceover ──
-    // Instead of the music cutting at voice end, gradually reduce the
-    // music volume over the last RESOLVE_DURATION seconds. This creates
-    // stepped volume reductions that applyVolumeCurve turns into
-    // smooth ramps, so music naturally resolves with the voice.
-    // Only applied when the last segment's music isn't explicitly 'building'
-    // or 'full' — those should stay energetic through the CTA.
-    const RESOLVE_DURATION = 2.5; // fade music over last 2.5s
-    const RESOLVE_STEPS = 5;
+    // ── Music swell-back after voiceover ends ──────────────────────
+    // After the voiceover finishes, swell the music back up from ducked
+    // level to near-full, then let FFmpeg's afade handle the final
+    // smooth fade to silence over the MUSIC_TAIL duration.
+    // This creates the professional radio effect: voice ends → music
+    // comes back up → gentle fade to silence.
+    const SWELL_DURATION = 0.8; // ramp music back up over 0.8s
 
-    // Check if the last music segment wants to stay energetic
-    const lastMusicBehavior = musicVolumeSegments.length > 0
-      ? musicVolumeSegments[musicVolumeSegments.length - 1].behavior
-      : 'ducked';
-    const skipResolvingFade = lastMusicBehavior === 'building' || lastMusicBehavior === 'full';
+    if (lastVoiceEntry && musicVolumeSegments.length > 0 && cursor > lastVoiceEnd) {
+      const lastMvs = musicVolumeSegments[musicVolumeSegments.length - 1];
+      const duckedVol = lastMvs.volume;
+      const swellTarget = 0.50; // swell back to near-full
 
-    if (lastVoiceEntry && musicVolumeSegments.length > 0 && !skipResolvingFade) {
-      const resolveStart = Math.max(0, lastVoiceEnd - RESOLVE_DURATION);
-
-      // Find the music volume segment that covers the resolve period
-      const lastMvsIdx = musicVolumeSegments.length - 1;
-      const lastMvs = musicVolumeSegments[lastMvsIdx];
-
-      if (lastMvs && lastMvs.startTime < resolveStart && lastMvs.endTime > resolveStart) {
-        const originalVol = lastMvs.volume;
-        const originalEnd = lastMvs.endTime;
-
-        // Truncate the existing segment to end where the resolve starts
-        lastMvs.endTime = resolveStart;
-
-        // Add stepped fade-down segments
-        const stepDuration = (originalEnd - resolveStart) / RESOLVE_STEPS;
-        for (let step = 0; step < RESOLVE_STEPS; step++) {
-          const stepStart = resolveStart + step * stepDuration;
-          const stepEnd = stepStart + stepDuration;
-          // Fade from originalVol down to 0.3 so music is still audible
-          // going into the tail, where afade handles the final fade to silence
-          const stepVol = originalVol * (1 - ((step + 1) / RESOLVE_STEPS) * 0.7);
-          musicVolumeSegments.push({
-            startTime: stepStart,
-            endTime: stepEnd,
-            volume: Math.max(0.25, stepVol),
-            behavior: 'resolving',
-          });
-        }
-
-        logger.info(
-          `Music resolving fade: ${originalVol.toFixed(2)} → 0.25 over ${RESOLVE_DURATION}s ` +
-          `(${resolveStart.toFixed(1)}s → ${originalEnd.toFixed(1)}s)`
-        );
+      // Trim the last ducked segment to end at voice end
+      if (lastMvs.endTime > lastVoiceEnd) {
+        lastMvs.endTime = lastVoiceEnd;
       }
+
+      // Add a swell-up segment (ducked → full over SWELL_DURATION)
+      const swellEnd = Math.min(lastVoiceEnd + SWELL_DURATION, cursor);
+      musicVolumeSegments.push({
+        startTime: lastVoiceEnd,
+        endTime: swellEnd,
+        volume: (duckedVol + swellTarget) / 2, // midpoint for the ramp
+        behavior: 'building',
+      });
+
+      // Add the full-volume tail (FFmpeg afade handles the fade to silence)
+      if (swellEnd < cursor) {
+        musicVolumeSegments.push({
+          startTime: swellEnd,
+          endTime: cursor,
+          volume: swellTarget,
+          behavior: 'full',
+        });
+      }
+
+      logger.info(
+        `Music swell-back after voice: ${duckedVol.toFixed(2)} → ${swellTarget.toFixed(2)} ` +
+        `over ${SWELL_DURATION}s (${lastVoiceEnd.toFixed(1)}s → ${cursor.toFixed(1)}s)`
+      );
     }
 
     return { timeline, musicVolumeSegments, totalDuration: cursor, lastVoiceEndTime: lastVoiceEnd };
@@ -677,12 +667,18 @@ class TimelineComposerService {
       const avgEnergy = totalWeight > 0 ? weightedEnergy / totalWeight : 5;
       const normalizedEnergy = (avgEnergy - minEnergy) / energyRange; // 0-1
 
-      // Map to multiplier: low energy → 0.7x, high energy → 1.15x
-      // Don't apply to 'none' behavior segments
-      if (mvs.behavior !== 'none') {
-        const energyMultiplier = 0.7 + normalizedEnergy * 0.45;
-        mvs.volume = mvs.volume * energyMultiplier;
-      }
+      // Apply energy multiplier based on behavior:
+      //   - full/building/accent: wider range (0.8 - 1.15) for musical dynamics
+      //   - ducked/resolving: very narrow range (0.97 - 1.03) to keep music
+      //     consistent under voice — big swings here sound like "different music"
+      //   - none: skip entirely
+      if (mvs.behavior === 'none') continue;
+
+      const isDuckedBehavior = mvs.behavior === 'ducked' || mvs.behavior === 'resolving';
+      const energyMultiplier = isDuckedBehavior
+        ? 0.97 + normalizedEnergy * 0.06   // 0.97 - 1.03 (barely noticeable)
+        : 0.80 + normalizedEnergy * 0.35;  // 0.80 - 1.15 (musical dynamics)
+      mvs.volume = mvs.volume * energyMultiplier;
     }
 
     logger.info('Energy arc applied to music volume envelope', {
