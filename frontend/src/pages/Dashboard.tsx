@@ -1,12 +1,19 @@
 import { Box, Typography, Grid, Paper } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { Add, Mic, MusicNote, AutoAwesome, RecordVoiceOver } from '@mui/icons-material';
+import { Add, Mic, MusicNote, AutoAwesome, RecordVoiceOver, Campaign } from '@mui/icons-material';
 import QuickProduction from '../components/QuickProduction';
 
 const Dashboard = () => {
   const navigate = useNavigate();
 
   const cards = [
+    {
+      title: 'Ad Builder',
+      description: 'Build audio ads with elastic templates — voice + music auto-mixed',
+      icon: <Campaign fontSize="large" />,
+      path: '/ad-builder',
+      color: '#7b1fa2',
+    },
     {
       title: 'Projects',
       description: 'Manage your audio production projects',
