@@ -104,8 +104,10 @@ export interface TimelineComposerResult {
 const SAMPLE_RATE = 48000;
 const NORMALIZE_FILTER = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
-/** Volume ramp duration at music segment boundaries (avoids pops/clicks) */
-const VOLUME_RAMP_SEC = 0.08;
+/** Volume ramp duration at music segment boundaries.
+ *  0.5s gives a smooth, gradual transition between volume levels.
+ *  (Was 0.08s which felt like a hard cut.) */
+const VOLUME_RAMP_SEC = 0.5;
 
 // ---------------------------------------------------------------------------
 // Service
@@ -168,6 +170,17 @@ class TimelineComposerService {
       musicVolumeSegments: musicVolumeSegments.length,
       totalDuration: totalDuration.toFixed(1),
       lastVoiceEndTime: lastVoiceEndTime.toFixed(1),
+    });
+
+    // Detailed music volume log for debugging
+    logger.info('=== [TIMELINE] MUSIC VOLUME SEGMENTS ===', {
+      baseMusicVolume,
+      segments: musicVolumeSegments.map((s, i) => ({
+        idx: i,
+        time: `${s.startTime.toFixed(1)}s → ${s.endTime.toFixed(1)}s`,
+        volume: s.volume.toFixed(3),
+        behavior: s.behavior,
+      })),
     });
 
     // 2a. Apply voice presence EQ to voice tracks for enhanced clarity.
@@ -364,6 +377,14 @@ class TimelineComposerService {
       // --- Music volume for this segment ---
       const musicBehavior = seg.music?.behavior ?? 'none';
       const musicVolForSegment = this.resolveMusicVolume(musicBehavior, seg.music?.volume, baseMusicVolume);
+
+      logger.info(`=== [TIMELINE] Segment ${segIdx} "${seg.label}" music volume ===`, {
+        behavior: musicBehavior,
+        llmExplicitVolume: seg.music?.volume,
+        resolvedVolume: musicVolForSegment.toFixed(3),
+        timeRange: `${segStart.toFixed(1)}s → ${segEnd.toFixed(1)}s`,
+      });
+
       musicVolumeSegments.push({
         startTime: segStart,
         endTime: segEnd,
@@ -410,11 +431,13 @@ class TimelineComposerService {
           }
 
           case 'duck_transition': {
-            // Duck: briefly drop music volume at the boundary, then bring it back.
-            // Creates a momentary "dip" that makes the transition feel clean.
+            // Gentle duck: music eases down slightly at the boundary.
+            // Only a subtle dip (90% of current volume) — the real ducking
+            // is handled by the volume envelope + sidechain compression.
             const duckDur = Math.min(transitionDur, 0.5);
             if (duckDur > 0.05) {
-              const duckVol = Math.min(musicVolForSegment, baseMusicVolume) * 0.5;
+              // Gentle dip: 90% of current volume (not 50% of minimum!)
+              const duckVol = musicVolForSegment * 0.90;
 
               // Add a duck region at the end of this segment
               const duckStart = Math.max(segStart, segEnd - duckDur);
@@ -426,7 +449,7 @@ class TimelineComposerService {
                 behavior: 'ducked',
               });
 
-              logger.debug(`Transition: duck ${duckDur.toFixed(2)}s at end of "${seg.label}"`);
+              logger.debug(`Transition: duck ${duckDur.toFixed(2)}s at end of "${seg.label}" (${musicVolForSegment.toFixed(2)} → ${duckVol.toFixed(2)})`);
             }
             cursor = segEnd;
             break;
@@ -555,36 +578,36 @@ class TimelineComposerService {
 
   /**
    * Resolve the actual music volume for a segment based on its behavior.
+   *
+   * Key design rule: ducked music should only be 20% quieter than full music.
+   * The LLM often outputs very low values (0.15-0.20) which make the music
+   * essentially disappear. We enforce a minimum of 80% of full volume for
+   * ducked segments so the music bed stays present under the voice.
    */
   private resolveMusicVolume(
     behavior: MusicBehavior,
     segmentVolume: number | undefined,
     baseMusicVolume: number
   ): number {
-    // If the segment specifies an explicit volume, use it
-    if (segmentVolume !== undefined) {
-      return segmentVolume;
-    }
-
     switch (behavior) {
       case 'full':
-        // Lower starting volume so sidechain duck isn't a dramatic drop
-        return 0.30;
+        // Full music: use explicit volume if given, otherwise strong presence
+        return segmentVolume !== undefined ? Math.max(segmentVolume, 0.30) : 0.50;
       case 'ducked':
-        // Moderate baseline under voice — sidechain compression handles
-        // the dynamic ducking, so this doesn't need to be very low.
-        return Math.max(0.25, baseMusicVolume * 1.5);
+        // Ducked = only 20% reduction from full. The sidechain compressor
+        // handles real-time dynamic ducking on top of this, so the base
+        // level must stay high. Ignore LLM's low values (0.15-0.20).
+        return 0.40;
       case 'building':
-        // Start at base, will ramp up (handled in envelope)
-        return baseMusicVolume * 2.0;
+        return segmentVolume !== undefined ? segmentVolume : baseMusicVolume * 2.0;
       case 'resolving':
-        return baseMusicVolume * 1.1;
+        return segmentVolume !== undefined ? segmentVolume : baseMusicVolume * 1.1;
       case 'accent':
-        return 0.6;
+        return segmentVolume !== undefined ? segmentVolume : 0.6;
       case 'none':
         return 0.0;
       default:
-        return baseMusicVolume;
+        return segmentVolume !== undefined ? segmentVolume : baseMusicVolume;
     }
   }
 
@@ -764,12 +787,13 @@ class TimelineComposerService {
           `[0:a]${NORMALIZE_FILTER},acompressor=threshold=-18dB:ratio=3:attack=15:release=200[vcomp]`,
           // Normalize music
           `[1:a]${NORMALIZE_FILTER}[mus]`,
-          // Sidechain compress: music eases down when voice is present.
-          // threshold=0.15 (~-16dBFS): only actual voiced speech triggers ducking, not breaths/noise
-          // ratio=3: gentle ducking, not hard-limiting
-          // attack=200ms: slow onset so music fades down gradually (not a hard drop)
-          // release=800ms: long recovery so music comes back smoothly after voice pauses
-          `[mus][vcomp]sidechaincompress=threshold=0.15:ratio=3:attack=200:release=800[out]`,
+          // Sidechain compress: very gentle ducking when voice is present.
+          // threshold=0.25: only strong voice triggers ducking
+          // ratio=1.5: barely noticeable compression (was 3 — too aggressive)
+          // attack=300ms: slow onset for gradual smooth fade down
+          // release=1200ms: very long recovery so music comes back slowly
+          // mix=0.3: blend only 30% of compressed signal (keeps most of original level)
+          `[mus][vcomp]sidechaincompress=threshold=0.25:ratio=1.5:attack=300:release=1200:mix=0.3[out]`,
         ];
 
         const filterStr = filters.join(';');
