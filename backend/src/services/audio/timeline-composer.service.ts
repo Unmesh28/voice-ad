@@ -128,7 +128,7 @@ class TimelineComposerService {
       musicFilePath,
       sfxResults,
       outputPath,
-      baseMusicVolume = 0.12,
+      baseMusicVolume = 0.20,
       fadeIn = 0.08,
       fadeOut = 0.4,
       fadeCurve = 'exp',
@@ -211,47 +211,24 @@ class TimelineComposerService {
     const envelopedMusicPath = path.join(outputDir, `timeline_music_env_${uuidv4().slice(0, 8)}.mp3`);
     await this.applyMusicVolumeEnvelope(preparedMusicPath, musicVolumeSegments, totalDuration, envelopedMusicPath);
 
-    // 4. Sidechain ducking: dynamically compress music when voice is present.
-    //    This makes ducking responsive to actual speech rhythm rather than
-    //    static volume levels. Falls back to envelope-only if sidechain fails.
-    let finalMusicPath = envelopedMusicPath;
-    // voiceEntries already computed above (step 2a) with presence EQ applied
+    // The volume envelope already handles per-segment ducking (full vs ducked
+    // vs building). Sidechain ducking on top would double-duck, making music
+    // inaudibly quiet under voice. Skip sidechain — envelope is sufficient.
+    const finalMusicPath = envelopedMusicPath;
 
-    if (voiceEntries.length > 0) {
-      try {
-        // Create a combined voice reference track for the sidechain key
-        const voiceRefPath = path.join(outputDir, `timeline_voiceref_${uuidv4().slice(0, 8)}.mp3`);
-        await ffmpegService.createVoiceReference(
-          voiceEntries.map((e) => ({ filePath: e.filePath, startTime: e.startTime, volume: e.volume })),
-          totalDuration,
-          voiceRefPath
-        );
-
-        // Apply 5-band sidechain ducking (surgical ducking in 150Hz–5kHz voice range)
-        const sidechainedPath = path.join(outputDir, `timeline_music_sc_${uuidv4().slice(0, 8)}.mp3`);
-        await ffmpegService.applySidechainDucking(envelopedMusicPath, voiceRefPath, sidechainedPath);
-        finalMusicPath = sidechainedPath;
-
-        logger.info('Sidechain ducking applied to music');
-
-        // Cleanup voice reference
-        ffmpegService.cleanupFile(voiceRefPath).catch(() => {});
-      } catch (scErr: any) {
-        logger.warn(`Sidechain ducking failed, using envelope-only: ${scErr.message}`);
-        finalMusicPath = envelopedMusicPath;
-      }
-    }
-
-    // 5. Compute fade-out: use the trailing music-after-voice duration
-    //    so the music fades out smoothly right as the voice ends.
+    // 5. Compute fade-out: only fade the music tail after voice ends.
+    //    fadeOutStart must be >= lastVoiceEndTime so voice is never faded.
     const trailingMusic = totalDuration - lastVoiceEndTime;
-    const effectiveFadeOut = Math.max(fadeOut, trailingMusic);
+    const effectiveFadeOut = trailingMusic > 0.3
+      ? Math.min(trailingMusic, fadeOut > 0 ? Math.max(fadeOut, trailingMusic) : trailingMusic)
+      : 0; // No fade if there's no real tail
 
     // 6. Build and run the FFmpeg filter_complex
     await this.buildAndRunMix({
       timeline,
       envelopedMusicPath: finalMusicPath,
       totalDuration,
+      lastVoiceEndTime,
       outputPath,
       fadeIn,
       fadeOut: effectiveFadeOut,
@@ -454,7 +431,7 @@ class TimelineComposerService {
       ? lastVoiceEntry.startTime + lastVoiceEntry.duration
       : cursor;
 
-    const MUSIC_TAIL = 0.3; // tiny tail for final fade cleanup
+    const MUSIC_TAIL = 2.0; // music plays 2s after voice ends for smooth fade-out
 
     if (cursor > lastVoiceEnd + MUSIC_TAIL && lastVoiceEntry) {
       const newDuration = lastVoiceEnd + MUSIC_TAIL;
@@ -482,11 +459,18 @@ class TimelineComposerService {
     // music volume over the last RESOLVE_DURATION seconds. This creates
     // stepped volume reductions that applyVolumeCurve turns into
     // smooth ramps, so music naturally resolves with the voice.
-    // 2.5s with 5 steps produces a very natural, broadcast-quality fade.
+    // Only applied when the last segment's music isn't explicitly 'building'
+    // or 'full' — those should stay energetic through the CTA.
     const RESOLVE_DURATION = 2.5; // fade music over last 2.5s
     const RESOLVE_STEPS = 5;
 
-    if (lastVoiceEntry && musicVolumeSegments.length > 0) {
+    // Check if the last music segment wants to stay energetic
+    const lastMusicBehavior = musicVolumeSegments.length > 0
+      ? musicVolumeSegments[musicVolumeSegments.length - 1].behavior
+      : 'ducked';
+    const skipResolvingFade = lastMusicBehavior === 'building' || lastMusicBehavior === 'full';
+
+    if (lastVoiceEntry && musicVolumeSegments.length > 0 && !skipResolvingFade) {
       const resolveStart = Math.max(0, lastVoiceEnd - RESOLVE_DURATION);
 
       // Find the music volume segment that covers the resolve period
@@ -555,10 +539,11 @@ class TimelineComposerService {
       case 'full':
         return 1.0;
       case 'ducked':
-        // Lower ducking = cleaner voice separation
-        return baseMusicVolume * 0.85;
+        // Music stays clearly audible under voice — not buried.
+        // With baseMusicVolume ~0.20, this gives ~0.20 (audible but not competing).
+        return Math.max(0.18, baseMusicVolume);
       case 'building':
-        // Start subtle, will ramp up (handled in envelope)
+        // Start at base, will ramp up (handled in envelope)
         return baseMusicVolume * 1.3;
       case 'resolving':
         return baseMusicVolume * 1.1;
@@ -729,6 +714,7 @@ class TimelineComposerService {
     timeline: TimelineEntry[];
     envelopedMusicPath: string;
     totalDuration: number;
+    lastVoiceEndTime: number;
     outputPath: string;
     fadeIn: number;
     fadeOut: number;
@@ -741,6 +727,7 @@ class TimelineComposerService {
       timeline,
       envelopedMusicPath,
       totalDuration,
+      lastVoiceEndTime,
       outputPath,
       fadeIn,
       fadeOut,
@@ -807,18 +794,27 @@ class TimelineComposerService {
         filters.push(`[mixraw]atrim=0:${trimDuration},asetpts=PTS-STARTPTS[trimmed]`);
 
         // Apply fades
-        // Allow up to 5s fade-out for musical outro segments (broadcast standard)
+        // Fade-in: tiny anti-click
+        // Fade-out: ONLY applied to the music tail after voice ends.
+        //   fadeOutStart is guaranteed >= lastVoiceEndTime so voice is never faded.
         const clampedFadeIn = Math.max(0.02, Math.min(0.12, fadeIn));
-        const clampedFadeOut = Math.max(0.1, Math.min(5.0, fadeOut));
-        const fadeOutStart = Math.max(0, trimDuration - clampedFadeOut);
         const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
 
-        // Use exp curve for longer musical fades (sounds more natural than linear tri)
-        const fadeOutCurve = clampedFadeOut > 1.0 ? 'exp' : 'tri';
-        filters.push(
-          `[trimmed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
-          `afade=t=out:st=${fadeOutStart}:d=${clampedFadeOut}:curve=${fadeOutCurve}[faded]`
-        );
+        if (fadeOut > 0.1) {
+          const clampedFadeOut = Math.max(0.1, Math.min(5.0, fadeOut));
+          // Ensure fade starts after voice ends, never during voice
+          const fadeOutStart = Math.max(lastVoiceEndTime, trimDuration - clampedFadeOut);
+          const fadeOutCurve = clampedFadeOut > 1.0 ? 'exp' : 'tri';
+          filters.push(
+            `[trimmed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
+            `afade=t=out:st=${fadeOutStart}:d=${clampedFadeOut}:curve=${fadeOutCurve}[faded]`
+          );
+        } else {
+          // No fade-out needed — just apply anti-click fade-in
+          filters.push(
+            `[trimmed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve}[faded]`
+          );
+        }
 
         // Loudness normalization
         if (normalizeLoudness) {
