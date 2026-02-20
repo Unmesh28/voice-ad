@@ -475,36 +475,61 @@ class TimelineComposerService {
       }
     }
 
-    // ── Align music ending with voiceover ending ───────────────────────
-    // 1. Trim trailing music-only segments so the ad ends with the voice.
-    // 2. Add a smooth resolving fade so music doesn't cut abruptly —
-    //    it fades down during the last ~2s of the final voiceover.
+    // ── Ensure voice content is never cut off ───────────────────────
+    // TTS may produce audio longer than the segment's allocated duration.
+    // Always extend the timeline to fit ALL voice content — never cut
+    // off a voiceover mid-sentence just because we hit the target duration.
     const lastVoiceEntry = [...timeline].reverse().find((e) => e.type === 'voice');
     const lastVoiceEnd = lastVoiceEntry
       ? lastVoiceEntry.startTime + lastVoiceEntry.duration
       : cursor;
 
-    const MUSIC_TAIL = 3.5; // music extends 3.5s after voice ends for a full fade-out
-
-    if (cursor > lastVoiceEnd + MUSIC_TAIL && lastVoiceEntry) {
-      const newDuration = lastVoiceEnd + MUSIC_TAIL;
-
+    if (lastVoiceEnd > cursor) {
+      // Extend the last music volume segment to cover the voice overshoot
+      const lastMvs = musicVolumeSegments[musicVolumeSegments.length - 1];
+      if (lastMvs) {
+        lastMvs.endTime = lastVoiceEnd;
+      }
       logger.info(
-        `Trimming trailing music: ${cursor.toFixed(1)}s → ${newDuration.toFixed(1)}s ` +
+        `Voice extends past segments: extending timeline ${cursor.toFixed(1)}s → ${lastVoiceEnd.toFixed(1)}s`
+      );
+      cursor = lastVoiceEnd;
+    }
+
+    // ── Always add a music tail after voice for smooth fade-out ───
+    const MUSIC_TAIL = 3.5; // music continues 3.5s after voice ends
+
+    const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
+
+    if (cursor > desiredEnd && lastVoiceEntry) {
+      // Timeline is longer than needed — trim trailing music
+      logger.info(
+        `Trimming trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s ` +
         `(voice ends at ${lastVoiceEnd.toFixed(1)}s)`
       );
 
       // Remove music volume segments fully past the new end,
       // and trim segments that straddle the boundary
       for (let i = musicVolumeSegments.length - 1; i >= 0; i--) {
-        if (musicVolumeSegments[i].startTime >= newDuration) {
+        if (musicVolumeSegments[i].startTime >= desiredEnd) {
           musicVolumeSegments.splice(i, 1);
-        } else if (musicVolumeSegments[i].endTime > newDuration) {
-          musicVolumeSegments[i].endTime = newDuration;
+        } else if (musicVolumeSegments[i].endTime > desiredEnd) {
+          musicVolumeSegments[i].endTime = desiredEnd;
         }
       }
 
-      cursor = newDuration;
+      cursor = desiredEnd;
+    } else if (cursor < desiredEnd) {
+      // Timeline is too short — extend to include the music tail
+      const lastMvs = musicVolumeSegments[musicVolumeSegments.length - 1];
+      if (lastMvs) {
+        lastMvs.endTime = desiredEnd;
+      }
+      logger.info(
+        `Extending timeline for music tail: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s ` +
+        `(voice ends at ${lastVoiceEnd.toFixed(1)}s, +${MUSIC_TAIL}s tail)`
+      );
+      cursor = desiredEnd;
     }
 
     // ── Music swell-back after voiceover ends ──────────────────────
