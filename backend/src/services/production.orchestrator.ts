@@ -424,15 +424,17 @@ export class ProductionOrchestrator {
 
     logger.info(`[Pipeline ${productionId}] Per-segment TTS complete: ${ttsResult.segmentResults.length} segments, ${ttsResult.totalVoiceDuration.toFixed(1)}s total voice`);
 
-    // ── Duration enforcement: adjust segment TTS speed to match target ──
-    // Voice should fill: targetDuration minus intro padding (0.5s) and tail (2.0s)
+    // ── Duration enforcement: compress voice only if significantly too long ──
+    // Voice should fill: targetDuration minus intro padding (0.5s) and tail (2.0s).
+    // If the script is short and voice is under target, that's fine — approximate
+    // duration is acceptable. Only speed up if voice is >20% too long.
     const voiceTargetDuration = duration - 2.5;
     if (voiceTargetDuration > 0 && ttsResult.totalVoiceDuration > 0) {
       const ratio = ttsResult.totalVoiceDuration / voiceTargetDuration;
-      // Only adjust if voice is >12% too long or >20% too short.
-      // Cap atempo to 0.85–1.25 to keep speech natural.
-      if (ratio > 1.12 || ratio < 0.80) {
-        const clampedRatio = Math.max(0.85, Math.min(1.25, ratio));
+      // Only speed up if voice is >20% too long. Never slow down short scripts.
+      // Cap atempo to 1.25 to keep speech natural.
+      if (ratio > 1.20) {
+        const clampedRatio = Math.min(1.25, ratio);
         logger.info(`[Pipeline ${productionId}] Voice duration off by ${((ratio - 1) * 100).toFixed(0)}%: ${ttsResult.totalVoiceDuration.toFixed(1)}s vs target ${voiceTargetDuration.toFixed(1)}s. Adjusting speed (atempo=${clampedRatio.toFixed(2)})`);
 
         for (const segResult of ttsResult.segmentResults) {
@@ -599,7 +601,7 @@ export class ProductionOrchestrator {
     // If the final composition significantly exceeds the target duration,
     // apply atempo to compress it.
     let finalDuration = composerResult.duration;
-    if (duration > 0 && finalDuration > duration * 1.05) {
+    if (duration > 0 && finalDuration > duration * 1.15) {
       const ratio = finalDuration / duration;
       const clampedRatio = Math.min(1.25, ratio);
       const adjustedTarget = finalDuration / clampedRatio;

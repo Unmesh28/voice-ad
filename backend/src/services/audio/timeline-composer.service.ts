@@ -511,7 +511,7 @@ class TimelineComposerService {
     // Keep music at its current volume after voice ends, add 3s tail,
     // and let FFmpeg's afade handle a smooth gradual fade to silence.
     // No volume envelope changes in the tail — just a clean fade.
-    const MUSIC_TAIL = 3.0;
+    const MUSIC_TAIL = 5.0;
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
     if (cursor > desiredEnd && lastVoiceEntry) {

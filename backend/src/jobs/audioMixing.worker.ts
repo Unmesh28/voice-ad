@@ -427,7 +427,7 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     // If the final mix significantly exceeds the target duration,
     // apply atempo to compress it to fit. This catches cases where
     // the TTS-level adjustment wasn't enough.
-    if (maxDuration && maxDuration > 0 && duration > maxDuration * 1.05) {
+    if (maxDuration && maxDuration > 0 && duration > maxDuration * 1.15) {
       const ratio = duration / maxDuration;
       // Only adjust up to 1.25x speed to keep audio natural
       const clampedRatio = Math.min(1.25, ratio);
