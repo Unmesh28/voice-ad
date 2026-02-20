@@ -1,0 +1,30 @@
+{
+  "id": "energetic_rock_03",
+  "name": "Energetic Rock 3",
+  "genre": "Rock",
+  "mood": "Driving",
+  "energy": "high",
+  "bpm": 135,
+  "instruments": [
+    "electric guitar",
+    "power drums",
+    "bass guitar",
+    "crash cymbals"
+  ],
+  "tags": [
+    "rock",
+    "driving",
+    "powerful",
+    "guitar",
+    "action"
+  ],
+  "bestFor": [
+    "automotive",
+    "sports",
+    "action",
+    "outdoor brands"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

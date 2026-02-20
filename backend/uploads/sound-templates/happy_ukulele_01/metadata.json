@@ -1,0 +1,31 @@
+{
+  "id": "happy_ukulele_01",
+  "name": "Happy Ukulele 1",
+  "genre": "Acoustic Pop",
+  "mood": "Happy",
+  "energy": "medium",
+  "bpm": 115,
+  "instruments": [
+    "ukulele",
+    "glockenspiel",
+    "claps",
+    "whistling"
+  ],
+  "tags": [
+    "happy",
+    "ukulele",
+    "playful",
+    "cheerful",
+    "bright",
+    "fun"
+  ],
+  "bestFor": [
+    "kids products",
+    "family brands",
+    "feel-good campaigns",
+    "summer"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

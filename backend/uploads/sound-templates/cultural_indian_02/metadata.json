@@ -1,0 +1,31 @@
+{
+  "id": "cultural_indian_02",
+  "name": "Cultural Indian Classical 2",
+  "genre": "Indian Classical",
+  "mood": "Elegant",
+  "energy": "low",
+  "bpm": 75,
+  "instruments": [
+    "sitar",
+    "tabla",
+    "tanpura drone",
+    "bansuri flute"
+  ],
+  "tags": [
+    "indian",
+    "classical",
+    "sitar",
+    "elegant",
+    "spiritual",
+    "traditional"
+  ],
+  "bestFor": [
+    "luxury Indian brands",
+    "spiritual products",
+    "yoga",
+    "traditional"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

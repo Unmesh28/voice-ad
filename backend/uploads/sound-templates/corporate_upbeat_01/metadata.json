@@ -1,0 +1,29 @@
+{
+  "id": "corporate_upbeat_01",
+  "name": "Corporate Upbeat 1",
+  "genre": "Corporate",
+  "mood": "Upbeat",
+  "energy": "medium",
+  "bpm": 120,
+  "instruments": [
+    "piano",
+    "light drums",
+    "synth pad",
+    "acoustic guitar"
+  ],
+  "tags": [
+    "corporate",
+    "upbeat",
+    "professional",
+    "clean"
+  ],
+  "bestFor": [
+    "business ads",
+    "SaaS products",
+    "professional services",
+    "B2B"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

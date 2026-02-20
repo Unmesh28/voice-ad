@@ -1,0 +1,29 @@
+{
+  "id": "corporate_minimal_03",
+  "name": "Corporate Minimal 3",
+  "genre": "Corporate",
+  "mood": "Minimal",
+  "energy": "low",
+  "bpm": 100,
+  "instruments": [
+    "soft piano",
+    "ambient pad",
+    "subtle clicks"
+  ],
+  "tags": [
+    "corporate",
+    "minimal",
+    "tech",
+    "modern",
+    "clean"
+  ],
+  "bestFor": [
+    "tech products",
+    "apps",
+    "startup",
+    "innovation"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

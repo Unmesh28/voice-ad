@@ -1,0 +1,30 @@
+{
+  "id": "energetic_edm_02",
+  "name": "Energetic EDM 2",
+  "genre": "EDM",
+  "mood": "Hype",
+  "energy": "high",
+  "bpm": 130,
+  "instruments": [
+    "supersaw synth",
+    "four-on-the-floor kick",
+    "hi-hats",
+    "sub bass"
+  ],
+  "tags": [
+    "edm",
+    "hype",
+    "electronic",
+    "dance",
+    "festival"
+  ],
+  "bestFor": [
+    "flash sales",
+    "gaming",
+    "nightlife",
+    "events"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

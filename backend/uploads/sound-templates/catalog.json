@@ -1,0 +1,542 @@
+[
+  {
+    "id": "corporate_upbeat_01",
+    "name": "Corporate Upbeat 1",
+    "genre": "Corporate",
+    "mood": "Upbeat",
+    "energy": "medium",
+    "bpm": 120,
+    "instruments": [
+      "piano",
+      "light drums",
+      "synth pad",
+      "acoustic guitar"
+    ],
+    "tags": [
+      "corporate",
+      "upbeat",
+      "professional",
+      "clean"
+    ],
+    "bestFor": [
+      "business ads",
+      "SaaS products",
+      "professional services",
+      "B2B"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "corporate_confident_02",
+    "name": "Corporate Confident 2",
+    "genre": "Corporate",
+    "mood": "Confident",
+    "energy": "medium",
+    "bpm": 110,
+    "instruments": [
+      "electric piano",
+      "bass guitar",
+      "brushed drums",
+      "strings"
+    ],
+    "tags": [
+      "corporate",
+      "confident",
+      "steady",
+      "authoritative"
+    ],
+    "bestFor": [
+      "finance",
+      "consulting",
+      "leadership",
+      "enterprise"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "energetic_pop_01",
+    "name": "Energetic Pop 1",
+    "genre": "Pop",
+    "mood": "Energetic",
+    "energy": "high",
+    "bpm": 128,
+    "instruments": [
+      "synth lead",
+      "electronic drums",
+      "bass synth",
+      "claps"
+    ],
+    "tags": [
+      "energetic",
+      "pop",
+      "upbeat",
+      "fun",
+      "bright"
+    ],
+    "bestFor": [
+      "sales events",
+      "product launches",
+      "fitness",
+      "youth brands"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15
+  },
+  {
+    "id": "energetic_edm_02",
+    "name": "Energetic EDM 2",
+    "genre": "EDM",
+    "mood": "Hype",
+    "energy": "high",
+    "bpm": 130,
+    "instruments": [
+      "supersaw synth",
+      "four-on-the-floor kick",
+      "hi-hats",
+      "sub bass"
+    ],
+    "tags": [
+      "edm",
+      "hype",
+      "electronic",
+      "dance",
+      "festival"
+    ],
+    "bestFor": [
+      "flash sales",
+      "gaming",
+      "nightlife",
+      "events"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "energetic_rock_03",
+    "name": "Energetic Rock 3",
+    "genre": "Rock",
+    "mood": "Driving",
+    "energy": "high",
+    "bpm": 135,
+    "instruments": [
+      "electric guitar",
+      "power drums",
+      "bass guitar",
+      "crash cymbals"
+    ],
+    "tags": [
+      "rock",
+      "driving",
+      "powerful",
+      "guitar",
+      "action"
+    ],
+    "bestFor": [
+      "automotive",
+      "sports",
+      "action",
+      "outdoor brands"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "calm_ambient_01",
+    "name": "Calm Ambient 1",
+    "genre": "Ambient",
+    "mood": "Calm",
+    "energy": "low",
+    "bpm": 70,
+    "instruments": [
+      "ambient pad",
+      "soft piano",
+      "nature textures",
+      "gentle bells"
+    ],
+    "tags": [
+      "calm",
+      "ambient",
+      "peaceful",
+      "soft",
+      "gentle"
+    ],
+    "bestFor": [
+      "healthcare",
+      "wellness",
+      "meditation apps",
+      "insurance"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "calm_acoustic_02",
+    "name": "Calm Acoustic 2",
+    "genre": "Acoustic",
+    "mood": "Warm",
+    "energy": "low",
+    "bpm": 85,
+    "instruments": [
+      "acoustic guitar",
+      "soft strings",
+      "light percussion",
+      "flute"
+    ],
+    "tags": [
+      "acoustic",
+      "warm",
+      "organic",
+      "natural",
+      "gentle"
+    ],
+    "bestFor": [
+      "food & beverage",
+      "family brands",
+      "organic products",
+      "charity"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "calm_lofi_03",
+    "name": "Calm Lo-Fi 3",
+    "genre": "Lo-Fi",
+    "mood": "Chill",
+    "energy": "low",
+    "bpm": 80,
+    "instruments": [
+      "lo-fi piano",
+      "vinyl crackle",
+      "muted drums",
+      "warm bass"
+    ],
+    "tags": [
+      "lofi",
+      "chill",
+      "relaxed",
+      "cozy",
+      "nostalgic"
+    ],
+    "bestFor": [
+      "coffee brands",
+      "lifestyle",
+      "creative tools",
+      "study apps"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "dramatic_cinematic_01",
+    "name": "Dramatic Cinematic 1",
+    "genre": "Cinematic",
+    "mood": "Dramatic",
+    "energy": "medium",
+    "bpm": 95,
+    "instruments": [
+      "orchestral strings",
+      "brass hits",
+      "timpani",
+      "choir pad"
+    ],
+    "tags": [
+      "cinematic",
+      "dramatic",
+      "epic",
+      "orchestral",
+      "premium"
+    ],
+    "bestFor": [
+      "movie trailers",
+      "luxury brands",
+      "premium products",
+      "awards"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "dramatic_tension_02",
+    "name": "Dramatic Tension 2",
+    "genre": "Cinematic",
+    "mood": "Suspenseful",
+    "energy": "medium",
+    "bpm": 90,
+    "instruments": [
+      "dark strings",
+      "sub bass pulse",
+      "metallic textures",
+      "reverse cymbal"
+    ],
+    "tags": [
+      "suspense",
+      "tension",
+      "dark",
+      "mysterious",
+      "thriller"
+    ],
+    "bestFor": [
+      "thriller content",
+      "cybersecurity",
+      "investigative",
+      "true crime"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "cultural_indian_01",
+    "name": "Cultural Indian 1",
+    "genre": "Indian",
+    "mood": "Festive",
+    "energy": "high",
+    "bpm": 115,
+    "instruments": [
+      "dhol",
+      "tumbi",
+      "sitar accents",
+      "tabla"
+    ],
+    "tags": [
+      "indian",
+      "punjabi",
+      "dhol",
+      "festive",
+      "bollywood",
+      "cultural"
+    ],
+    "bestFor": [
+      "Indian brands",
+      "Diwali campaigns",
+      "Bollywood",
+      "cultural events"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "cultural_indian_02",
+    "name": "Cultural Indian Classical 2",
+    "genre": "Indian Classical",
+    "mood": "Elegant",
+    "energy": "low",
+    "bpm": 75,
+    "instruments": [
+      "sitar",
+      "tabla",
+      "tanpura drone",
+      "bansuri flute"
+    ],
+    "tags": [
+      "indian",
+      "classical",
+      "sitar",
+      "elegant",
+      "spiritual",
+      "traditional"
+    ],
+    "bestFor": [
+      "luxury Indian brands",
+      "spiritual products",
+      "yoga",
+      "traditional"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "cultural_latin_03",
+    "name": "Cultural Latin 3",
+    "genre": "Latin",
+    "mood": "Groovy",
+    "energy": "medium",
+    "bpm": 105,
+    "instruments": [
+      "congas",
+      "timbales",
+      "brass section",
+      "piano montuno"
+    ],
+    "tags": [
+      "latin",
+      "salsa",
+      "tropical",
+      "groovy",
+      "brass"
+    ],
+    "bestFor": [
+      "Latin food brands",
+      "festivals",
+      "travel",
+      "dance events"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "cultural_arabic_04",
+    "name": "Cultural Arabic 4",
+    "genre": "Arabic",
+    "mood": "Majestic",
+    "energy": "medium",
+    "bpm": 95,
+    "instruments": [
+      "oud",
+      "darbuka",
+      "strings",
+      "ney flute"
+    ],
+    "tags": [
+      "arabic",
+      "middle-eastern",
+      "oud",
+      "majestic",
+      "cultural"
+    ],
+    "bestFor": [
+      "Middle Eastern brands",
+      "luxury",
+      "Ramadan campaigns",
+      "hospitality"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "jazz_smooth_01",
+    "name": "Jazz Smooth 1",
+    "genre": "Jazz",
+    "mood": "Smooth",
+    "energy": "low",
+    "bpm": 90,
+    "instruments": [
+      "jazz guitar",
+      "upright bass",
+      "brushed drums",
+      "saxophone"
+    ],
+    "tags": [
+      "jazz",
+      "smooth",
+      "sophisticated",
+      "lounge",
+      "elegant"
+    ],
+    "bestFor": [
+      "restaurants",
+      "wine brands",
+      "evening events",
+      "luxury lifestyle"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "retro_80s_synth_01",
+    "name": "Retro 80s Synth 1",
+    "genre": "Synthwave",
+    "mood": "Nostalgic",
+    "energy": "medium",
+    "bpm": 118,
+    "instruments": [
+      "analog synth",
+      "arpeggiated bass",
+      "gated reverb drums",
+      "pad"
+    ],
+    "tags": [
+      "synthwave",
+      "80s",
+      "retro",
+      "neon",
+      "nostalgic",
+      "electronic"
+    ],
+    "bestFor": [
+      "retro brands",
+      "gaming",
+      "tech nostalgia",
+      "neon aesthetics"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "happy_ukulele_01",
+    "name": "Happy Ukulele 1",
+    "genre": "Acoustic Pop",
+    "mood": "Happy",
+    "energy": "medium",
+    "bpm": 115,
+    "instruments": [
+      "ukulele",
+      "glockenspiel",
+      "claps",
+      "whistling"
+    ],
+    "tags": [
+      "happy",
+      "ukulele",
+      "playful",
+      "cheerful",
+      "bright",
+      "fun"
+    ],
+    "bestFor": [
+      "kids products",
+      "family brands",
+      "feel-good campaigns",
+      "summer"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  },
+  {
+    "id": "corporate_minimal_03",
+    "name": "Corporate Minimal 3",
+    "genre": "Corporate",
+    "mood": "Minimal",
+    "energy": "low",
+    "bpm": 100,
+    "instruments": [
+      "soft piano",
+      "ambient pad",
+      "subtle clicks"
+    ],
+    "tags": [
+      "corporate",
+      "minimal",
+      "tech",
+      "modern",
+      "clean"
+    ],
+    "bestFor": [
+      "tech products",
+      "apps",
+      "startup",
+      "innovation"
+    ],
+    "introDuration": 5,
+    "mainDuration": 15,
+    "outroDuration": 5
+  }
+]

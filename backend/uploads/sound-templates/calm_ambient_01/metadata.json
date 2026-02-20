@@ -1,0 +1,30 @@
+{
+  "id": "calm_ambient_01",
+  "name": "Calm Ambient 1",
+  "genre": "Ambient",
+  "mood": "Calm",
+  "energy": "low",
+  "bpm": 70,
+  "instruments": [
+    "ambient pad",
+    "soft piano",
+    "nature textures",
+    "gentle bells"
+  ],
+  "tags": [
+    "calm",
+    "ambient",
+    "peaceful",
+    "soft",
+    "gentle"
+  ],
+  "bestFor": [
+    "healthcare",
+    "wellness",
+    "meditation apps",
+    "insurance"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

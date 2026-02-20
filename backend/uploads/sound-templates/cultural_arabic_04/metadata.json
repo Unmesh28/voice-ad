@@ -1,0 +1,30 @@
+{
+  "id": "cultural_arabic_04",
+  "name": "Cultural Arabic 4",
+  "genre": "Arabic",
+  "mood": "Majestic",
+  "energy": "medium",
+  "bpm": 95,
+  "instruments": [
+    "oud",
+    "darbuka",
+    "strings",
+    "ney flute"
+  ],
+  "tags": [
+    "arabic",
+    "middle-eastern",
+    "oud",
+    "majestic",
+    "cultural"
+  ],
+  "bestFor": [
+    "Middle Eastern brands",
+    "luxury",
+    "Ramadan campaigns",
+    "hospitality"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

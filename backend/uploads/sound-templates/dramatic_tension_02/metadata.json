@@ -1,0 +1,30 @@
+{
+  "id": "dramatic_tension_02",
+  "name": "Dramatic Tension 2",
+  "genre": "Cinematic",
+  "mood": "Suspenseful",
+  "energy": "medium",
+  "bpm": 90,
+  "instruments": [
+    "dark strings",
+    "sub bass pulse",
+    "metallic textures",
+    "reverse cymbal"
+  ],
+  "tags": [
+    "suspense",
+    "tension",
+    "dark",
+    "mysterious",
+    "thriller"
+  ],
+  "bestFor": [
+    "thriller content",
+    "cybersecurity",
+    "investigative",
+    "true crime"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

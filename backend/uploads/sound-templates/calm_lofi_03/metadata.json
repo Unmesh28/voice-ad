@@ -1,0 +1,30 @@
+{
+  "id": "calm_lofi_03",
+  "name": "Calm Lo-Fi 3",
+  "genre": "Lo-Fi",
+  "mood": "Chill",
+  "energy": "low",
+  "bpm": 80,
+  "instruments": [
+    "lo-fi piano",
+    "vinyl crackle",
+    "muted drums",
+    "warm bass"
+  ],
+  "tags": [
+    "lofi",
+    "chill",
+    "relaxed",
+    "cozy",
+    "nostalgic"
+  ],
+  "bestFor": [
+    "coffee brands",
+    "lifestyle",
+    "creative tools",
+    "study apps"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

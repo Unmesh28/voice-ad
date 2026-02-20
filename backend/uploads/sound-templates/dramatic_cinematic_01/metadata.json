@@ -1,0 +1,30 @@
+{
+  "id": "dramatic_cinematic_01",
+  "name": "Dramatic Cinematic 1",
+  "genre": "Cinematic",
+  "mood": "Dramatic",
+  "energy": "medium",
+  "bpm": 95,
+  "instruments": [
+    "orchestral strings",
+    "brass hits",
+    "timpani",
+    "choir pad"
+  ],
+  "tags": [
+    "cinematic",
+    "dramatic",
+    "epic",
+    "orchestral",
+    "premium"
+  ],
+  "bestFor": [
+    "movie trailers",
+    "luxury brands",
+    "premium products",
+    "awards"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}
