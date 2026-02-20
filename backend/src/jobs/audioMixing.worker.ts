@@ -82,12 +82,13 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     // Get settings (fadeIn/fadeOut from LLM or defaults)
     const settings = (production.settings as any) || {};
     const voiceVolume = settings.voiceVolume !== undefined ? settings.voiceVolume : 1.0;
-    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.15;
-    const rawFadeIn = settings.fadeIn ?? 0.1;
-    const rawFadeOut = settings.fadeOut ?? 0.4;
-    const fadeIn = Math.max(0.02, Math.min(0.12, rawFadeIn));
-    const fadeOut = Math.max(0.1, Math.min(0.6, rawFadeOut));
-    const fadeCurve = settings.fadeCurve as 'linear' | 'exp' | 'qsin' | undefined;
+    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.25;
+    // Professional fade values: 1.5s fade-in, 3.5s fade-out with logarithmic curves
+    const rawFadeIn = settings.fadeIn ?? 1.5;
+    const rawFadeOut = settings.fadeOut ?? 3.5;
+    const fadeIn = Math.max(0.1, Math.min(2.5, rawFadeIn));
+    const fadeOut = Math.max(0.5, Math.min(5.0, rawFadeOut));
+    const fadeCurve = (settings.fadeCurve as 'linear' | 'exp' | 'qsin' | 'log' | undefined) ?? 'log';
     const audioDucking = settings.audioDucking !== false;
     const duckingAmount = settings.duckingAmount !== undefined ? Math.max(0, Math.min(1, settings.duckingAmount)) : 0.35;
     const outputFormat = settings.outputFormat || 'mp3';
@@ -289,10 +290,16 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       }
     }
 
+    // Target ad duration from the production context — used to cap the mix
+    // so content never runs over the selected duration (graceful fade-out, not hard cut).
+    const maxDuration: number | undefined =
+      settings.durationSeconds ?? scriptMetadata?.durationSeconds ?? scriptMetadata?.productionContext?.durationSeconds ?? undefined;
+
     // Mix audio
     logger.info(`Mixing audio for production ${productionId}`, {
       voiceDelay: voiceDelaySec.toFixed(2),
       hasAlignment: !!alignmentResult,
+      maxDuration,
     });
     await ffmpegService.mixAudio({
       voiceInput: voicePath ? {
@@ -316,6 +323,7 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       normalizeLoudness,
       loudnessTargetLUFS,
       loudnessTruePeak,
+      maxDuration,
     });
 
     await job.updateProgress(75);
@@ -365,6 +373,7 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
             normalizeLoudness,
             loudnessTargetLUFS,
             loudnessTruePeak,
+            maxDuration,
           });
 
           const remeasured = await ffmpegService.measureLoudness(outputPath);
