@@ -709,7 +709,7 @@ export function getAdFormatJsonSchema(): Record<string, unknown> {
                   description: 'Voice delivery style: excited, warm, whisper, urgent, calm, etc.',
                 },
               },
-              required: ['text'],
+              required: ['text', 'voiceStyle'],
               additionalProperties: false,
             },
             music: {
@@ -733,7 +733,7 @@ export function getAdFormatJsonSchema(): Record<string, unknown> {
                   items: { type: 'string' },
                 },
               },
-              required: ['description', 'behavior', 'volume'],
+              required: ['description', 'behavior', 'volume', 'culturalStyle', 'instruments'],
               additionalProperties: false,
             },
             sfx: {
@@ -743,7 +743,7 @@ export function getAdFormatJsonSchema(): Record<string, unknown> {
                 description: { type: 'string', description: 'What the SFX sounds like' },
                 volume: { type: ['number', 'null'], description: 'Relative volume 0.0-1.0' },
               },
-              required: ['description'],
+              required: ['description', 'volume'],
               additionalProperties: false,
             },
             transition: {
@@ -756,7 +756,7 @@ export function getAdFormatJsonSchema(): Record<string, unknown> {
               description: 'Transition duration in seconds (for crossfade/duck)',
             },
           },
-          required: ['segmentIndex', 'type', 'label', 'duration', 'voiceover', 'music', 'sfx', 'transition'],
+          required: ['segmentIndex', 'type', 'label', 'duration', 'voiceover', 'music', 'sfx', 'transition', 'transitionDuration'],
           additionalProperties: false,
         },
       },
@@ -770,7 +770,7 @@ export function getAdFormatJsonSchema(): Record<string, unknown> {
         description: 'Cultural context hint, e.g. "Punjabi folk with dhol and tumbi", "Brazilian samba"',
       },
     },
-    required: ['templateId', 'templateName', 'totalDuration', 'segments', 'overallMusicDirection'],
+    required: ['templateId', 'templateName', 'totalDuration', 'segments', 'overallMusicDirection', 'culturalContext'],
     additionalProperties: false,
   };
 }
