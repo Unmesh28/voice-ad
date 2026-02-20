@@ -496,20 +496,15 @@ class TimelineComposerService {
       cursor = lastVoiceEnd;
     }
 
-    // ── Always add a music tail after voice for smooth fade-out ───
-    const MUSIC_TAIL = 1.5; // music continues 1.5s after voice ends
-
+    // ── Music tail: continue after voice, then smooth fade-out ─────
+    // Keep music at its current volume after voice ends, add 3s tail,
+    // and let FFmpeg's afade handle a smooth gradual fade to silence.
+    // No volume envelope changes in the tail — just a clean fade.
+    const MUSIC_TAIL = 3.0;
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
     if (cursor > desiredEnd && lastVoiceEntry) {
-      // Timeline is longer than needed — trim trailing music
-      logger.info(
-        `Trimming trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s ` +
-        `(voice ends at ${lastVoiceEnd.toFixed(1)}s)`
-      );
-
-      // Remove music volume segments fully past the new end,
-      // and trim segments that straddle the boundary
+      // Trim trailing music that's too long
       for (let i = musicVolumeSegments.length - 1; i >= 0; i--) {
         if (musicVolumeSegments[i].startTime >= desiredEnd) {
           musicVolumeSegments.splice(i, 1);
@@ -517,62 +512,18 @@ class TimelineComposerService {
           musicVolumeSegments[i].endTime = desiredEnd;
         }
       }
-
+      logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s`);
       cursor = desiredEnd;
     } else if (cursor < desiredEnd) {
-      // Timeline is too short — extend to include the music tail
+      // Extend last music volume segment to cover the tail
       const lastMvs = musicVolumeSegments[musicVolumeSegments.length - 1];
       if (lastMvs) {
         lastMvs.endTime = desiredEnd;
       }
       logger.info(
-        `Extending timeline for music tail: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s ` +
-        `(voice ends at ${lastVoiceEnd.toFixed(1)}s, +${MUSIC_TAIL}s tail)`
+        `Music tail: voice ends ${lastVoiceEnd.toFixed(1)}s, music continues to ${desiredEnd.toFixed(1)}s (+${MUSIC_TAIL}s fade-out)`
       );
       cursor = desiredEnd;
-    }
-
-    // ── Music swell-back after voiceover ends ──────────────────────
-    // After the voiceover finishes, swell the music back up from ducked
-    // level to near-full, then let FFmpeg's afade handle the final
-    // smooth fade to silence over the MUSIC_TAIL duration.
-    // This creates the professional radio effect: voice ends → music
-    // comes back up → gentle fade to silence.
-    const SWELL_DURATION = 0.8; // ramp music back up over 0.8s
-
-    if (lastVoiceEntry && musicVolumeSegments.length > 0 && cursor > lastVoiceEnd) {
-      const lastMvs = musicVolumeSegments[musicVolumeSegments.length - 1];
-      const duckedVol = lastMvs.volume;
-      const swellTarget = 0.50; // swell back to near-full
-
-      // Trim the last ducked segment to end at voice end
-      if (lastMvs.endTime > lastVoiceEnd) {
-        lastMvs.endTime = lastVoiceEnd;
-      }
-
-      // Add a swell-up segment (ducked → full over SWELL_DURATION)
-      const swellEnd = Math.min(lastVoiceEnd + SWELL_DURATION, cursor);
-      musicVolumeSegments.push({
-        startTime: lastVoiceEnd,
-        endTime: swellEnd,
-        volume: (duckedVol + swellTarget) / 2, // midpoint for the ramp
-        behavior: 'building',
-      });
-
-      // Add the full-volume tail (FFmpeg afade handles the fade to silence)
-      if (swellEnd < cursor) {
-        musicVolumeSegments.push({
-          startTime: swellEnd,
-          endTime: cursor,
-          volume: swellTarget,
-          behavior: 'full',
-        });
-      }
-
-      logger.info(
-        `Music swell-back after voice: ${duckedVol.toFixed(2)} → ${swellTarget.toFixed(2)} ` +
-        `over ${SWELL_DURATION}s (${lastVoiceEnd.toFixed(1)}s → ${cursor.toFixed(1)}s)`
-      );
     }
 
     return { timeline, musicVolumeSegments, totalDuration: cursor, lastVoiceEndTime: lastVoiceEnd };
