@@ -101,7 +101,7 @@ export interface TimelineComposerResult {
 // Constants
 // ---------------------------------------------------------------------------
 
-const SAMPLE_RATE = 44100;
+const SAMPLE_RATE = 48000;
 const NORMALIZE_FILTER = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
 /** Volume ramp duration at music segment boundaries (avoids pops/clicks) */
@@ -765,10 +765,11 @@ class TimelineComposerService {
           // Normalize music
           `[1:a]${NORMALIZE_FILTER}[mus]`,
           // Sidechain compress: music eases down when voice is present.
+          // threshold=0.15 (~-16dBFS): only actual voiced speech triggers ducking, not breaths/noise
+          // ratio=3: gentle ducking, not hard-limiting
           // attack=200ms: slow onset so music fades down gradually (not a hard drop)
-          // release=500ms: slow recovery so music comes back smoothly after voice pauses
-          // threshold=0.05: slightly less sensitive trigger
-          `[mus][vcomp]sidechaincompress=threshold=0.05:ratio=4:attack=200:release=500[out]`,
+          // release=800ms: long recovery so music comes back smoothly after voice pauses
+          `[mus][vcomp]sidechaincompress=threshold=0.15:ratio=3:attack=200:release=800[out]`,
         ];
 
         const filterStr = filters.join(';');
@@ -776,7 +777,7 @@ class TimelineComposerService {
 
         command
           .audioCodec('libmp3lame')
-          .audioBitrate('192k')
+          .audioBitrate('320k')
           .audioChannels(2)
           .audioFrequency(SAMPLE_RATE);
         command.output(outputPath);
@@ -918,7 +919,7 @@ class TimelineComposerService {
         if (normalizeLoudness) {
           const target = Math.max(-60, Math.min(0, loudnessTargetLUFS));
           const tp = Math.max(-10, Math.min(0, loudnessTruePeak));
-          filters.push(`[faded]loudnorm=I=${target}:TP=${tp}:LRA=11.0[out]`);
+          filters.push(`[faded]loudnorm=I=${target}:TP=${tp}:LRA=3.0[out]`);
         } else {
           filters.push('[faded]volume=1.5[out]');
         }
@@ -929,7 +930,7 @@ class TimelineComposerService {
         // Output settings
         command
           .audioCodec('libmp3lame')
-          .audioBitrate('192k')
+          .audioBitrate('320k')
           .audioChannels(2)
           .audioFrequency(SAMPLE_RATE)
           .output(outputPath);

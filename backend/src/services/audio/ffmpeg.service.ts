@@ -167,7 +167,7 @@ class FFmpegService {
         const voiceDelaySec = voiceInput.delay ?? 0;
 
         // Single, compatible filter chain: normalize both to same format and sample rate for proper sync, then mix.
-        // Same sample rate (44100) and stereo ensures music and speech stay sample-aligned with no drift.
+        // Same sample rate (48000) and stereo ensures music and speech stay sample-aligned with no drift.
         // Get music duration so we keep the full outro music swell after voice ends.
         const musicDuration = await this.getAudioDuration(musicInput.filePath);
         const voiceTotalDuration = voiceDuration + voiceDelaySec;
@@ -187,7 +187,7 @@ class FFmpegService {
             mixDuration = opts.maxDuration;
           }
         }
-        const SAMPLE_RATE = 44100;
+        const SAMPLE_RATE = 48000;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
         // Voice: normalize, volume, optional delay, then compress for consistent level
@@ -203,9 +203,10 @@ class FFmpegService {
           // Music: normalize, volume, gentle fade-in for smooth start
           `[1:a]${normalizeSync},volume=${musicVolume},afade=t=in:st=0:d=0.8:curve=tri[mus]`,
           // Sidechain compress: music eases down when voice is present.
+          // threshold=0.15 (~-16dBFS): only actual voiced speech triggers ducking, not breaths/noise
           // attack=200ms: slow onset so volume drop is gradual, not abrupt
-          // release=500ms: slow recovery for smooth transitions
-          `[mus][vsc]sidechaincompress=threshold=0.05:ratio=4:attack=200:release=500[mduck]`,
+          // release=800ms: long recovery for smooth, natural transitions
+          `[mus][vsc]sidechaincompress=threshold=0.15:ratio=3:attack=200:release=800[mduck]`,
           // Mix compressed voice + ducked music (no auto-normalize, loudnorm handles levels)
           `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
@@ -252,7 +253,7 @@ class FFmpegService {
         if (normalizeLoudness) {
           const target = Math.max(-60, Math.min(0, loudnessTargetLUFS));
           const tp = Math.max(-10, Math.min(0, loudnessTruePeak));
-          filters.push(`[faded]loudnorm=I=${target}:TP=${tp}:LRA=11.0[out]`);
+          filters.push(`[faded]loudnorm=I=${target}:TP=${tp}:LRA=3.0[out]`);
         } else if (normalize) {
           filters.push('[faded]volume=1.5[out]');
         } else {
@@ -366,27 +367,27 @@ class FFmpegService {
       case 'mp3':
         command
           .audioCodec('libmp3lame')
-          .audioBitrate('192k')
+          .audioBitrate('320k')
           .audioChannels(2)
-          .audioFrequency(44100);
+          .audioFrequency(48000);
         break;
       case 'wav':
         command
           .audioCodec('pcm_s16le')
           .audioChannels(2)
-          .audioFrequency(44100);
+          .audioFrequency(48000);
         break;
       case 'aac':
         command
           .audioCodec('aac')
-          .audioBitrate('192k')
+          .audioBitrate('320k')
           .audioChannels(2)
-          .audioFrequency(44100);
+          .audioFrequency(48000);
         break;
       default:
         command
           .audioCodec('libmp3lame')
-          .audioBitrate('192k');
+          .audioBitrate('320k');
     }
   }
 
@@ -569,7 +570,7 @@ class FFmpegService {
         const command = ffmpeg();
         segmentsWithDurations.forEach((seg) => command.input(seg.filePath));
 
-        const SAMPLE_RATE = 44100;
+        const SAMPLE_RATE = 48000;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
         const filters: string[] = [];
 
@@ -663,7 +664,7 @@ class FFmpegService {
 
         // Create filter to loop and trim to exact duration
         const filters = [
-          `aloop=loop=${loopCount - 1}:size=44100*${Math.ceil(currentDuration)}`,
+          `aloop=loop=${loopCount - 1}:size=48000*${Math.ceil(currentDuration)}`,
           `atrim=0:${targetDuration}`,
           'asetpts=PTS-STARTPTS'
         ];
@@ -747,7 +748,7 @@ class FFmpegService {
     return new Promise((resolve, reject) => {
       try {
         const command = ffmpeg(inputPath);
-        const SAMPLE_RATE = 44100;
+        const SAMPLE_RATE = 48000;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
         // Single stream + time-based volume with smooth ramps; eval=frame so t updates per frame
         const filterStr = `[0:a]${normalizeSync},volume=volume='${volumeExpr}':eval=frame[out]`;
@@ -840,7 +841,7 @@ class FFmpegService {
 
     if (layers.length === 0) throw new Error('mixMultipleAudioLayers requires at least one layer');
 
-    const SAMPLE_RATE = 44100;
+    const SAMPLE_RATE = 48000;
     const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
     return new Promise(async (resolve, reject) => {
@@ -955,7 +956,7 @@ class FFmpegService {
           filters.push(`alimiter=limit=${limit}dB:release=${rel}`);
         }
         const target = Math.max(-60, Math.min(0, targetLoudness));
-        filters.push(`loudnorm=I=${target}:TP=-2:LRA=7`);
+        filters.push(`loudnorm=I=${target}:TP=-2:LRA=3`);
 
         if (filters.length > 0) {
           command.audioFilters(filters);
@@ -1041,6 +1042,151 @@ class FFmpegService {
       logger.warn(`Loudness measurement failed: ${error.message}`);
       return -16; // Default fallback
     }
+  }
+
+  /**
+   * Normalize audio to a target loudness using EBU R128 loudnorm (two-pass style).
+   * Use before mixing to ensure consistent input levels regardless of source.
+   * @param inputPath  Source audio file
+   * @param outputPath Normalized output file
+   * @param targetLUFS Target integrated loudness (default -18 LUFS for music beds, -16 for voice)
+   * @param truePeak   Maximum true peak in dB (default -2)
+   * @param lra        Maximum loudness range (default 7 for music, 3 for voice)
+   */
+  async normalizeAudioLoudness(
+    inputPath: string,
+    outputPath: string,
+    targetLUFS: number = -18,
+    truePeak: number = -2,
+    lra: number = 7
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info(`Normalizing audio loudness to ${targetLUFS} LUFS, TP=${truePeak}dB`, { inputPath });
+
+        const command = ffmpeg(inputPath);
+        command.audioFilters(`loudnorm=I=${targetLUFS}:TP=${truePeak}:LRA=${lra}`);
+        this.setOutputOptions(command, 'mp3');
+        command.output(outputPath);
+
+        command
+          .on('end', () => {
+            logger.info('Audio loudness normalization complete:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('FFmpeg loudness normalization error:', msg);
+            reject(new Error(`Loudness normalization failed: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Trim leading and trailing silence from an audio file.
+   * @param inputPath  Source audio file
+   * @param outputPath Trimmed output file
+   * @param threshold  Silence threshold in dB (default -40dB)
+   * @param minDuration Minimum silence duration to detect in seconds (default 0.1s)
+   */
+  async trimSilence(
+    inputPath: string,
+    outputPath: string,
+    threshold: number = -40,
+    minDuration: number = 0.1
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info('Trimming silence from audio', { inputPath, threshold, minDuration });
+
+        const command = ffmpeg(inputPath);
+        // silenceremove: remove leading silence (start_periods=1), then trailing (stop_periods=1)
+        command.audioFilters(
+          `silenceremove=start_periods=1:start_threshold=${threshold}dB:start_duration=${minDuration}:stop_periods=1:stop_threshold=${threshold}dB:stop_duration=${minDuration}`
+        );
+        this.setOutputOptions(command, 'mp3');
+        command.output(outputPath);
+
+        command
+          .on('end', () => {
+            logger.info('Silence trimming complete:', outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('FFmpeg silence trimming error:', msg);
+            reject(new Error(`Silence trimming failed: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Enforce a target duration on an audio file by padding with silence or trimming with fade-out.
+   * @param inputPath  Source audio file
+   * @param outputPath Output file with enforced duration
+   * @param targetDuration Target duration in seconds
+   * @param fadeOutDuration Fade-out duration when trimming (default 1.5s)
+   */
+  async enforceDuration(
+    inputPath: string,
+    outputPath: string,
+    targetDuration: number,
+    fadeOutDuration: number = 1.5
+  ): Promise<string> {
+    const currentDuration = await this.getAudioDuration(inputPath);
+
+    if (Math.abs(currentDuration - targetDuration) < 0.1) {
+      // Close enough — just copy
+      return this.processAudio({ filePath: inputPath }, outputPath, 'mp3');
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const command = ffmpeg(inputPath);
+
+        if (currentDuration > targetDuration) {
+          // Trim with fade-out at the end
+          const fadeStart = Math.max(0, targetDuration - fadeOutDuration);
+          command.audioFilters([
+            `atrim=0:${targetDuration}`,
+            'asetpts=PTS-STARTPTS',
+            `afade=t=out:st=${fadeStart}:d=${fadeOutDuration}:curve=exp`,
+          ].join(','));
+        } else {
+          // Pad with silence to reach target duration
+          const padDuration = targetDuration - currentDuration;
+          command.audioFilters(`apad=pad_dur=${padDuration}`);
+        }
+
+        this.setOutputOptions(command, 'mp3');
+        command.output(outputPath);
+
+        command
+          .on('end', () => {
+            logger.info(`Duration enforced to ${targetDuration}s:`, outputPath);
+            resolve(outputPath);
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error('FFmpeg enforceDuration error:', msg);
+            reject(new Error(`Duration enforcement failed: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
   }
 
   /**
@@ -1139,7 +1285,7 @@ class FFmpegService {
         command.input(musicPath);  // [0:a] = music
         command.input(voicePath);  // [1:a] = voice (sidechain key)
 
-        const SAMPLE_RATE = 44100;
+        const SAMPLE_RATE = 48000;
         const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
         // Light compression for low-mid (voice chest resonance — duck gently)
@@ -1223,7 +1369,7 @@ class FFmpegService {
         command.input(musicPath);
         command.input(voicePath);
 
-        const SAMPLE_RATE = 44100;
+        const SAMPLE_RATE = 48000;
         const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
         const filters = [
@@ -1271,7 +1417,7 @@ class FFmpegService {
     return new Promise((resolve, reject) => {
       try {
         const command = ffmpeg();
-        const SAMPLE_RATE = 44100;
+        const SAMPLE_RATE = 48000;
         const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
         for (const entry of entries) {
@@ -1368,9 +1514,9 @@ class FFmpegService {
         command
           .audioFilters(eqFilter)
           .audioCodec('libmp3lame')
-          .audioBitrate('192k')
+          .audioBitrate('320k')
           .audioChannels(2)
-          .audioFrequency(44100)
+          .audioFrequency(48000)
           .output(outputPath);
 
         command
@@ -1421,9 +1567,9 @@ class FFmpegService {
         command
           .audioFilters(eqFilter)
           .audioCodec('libmp3lame')
-          .audioBitrate('192k')
+          .audioBitrate('320k')
           .audioChannels(2)
-          .audioFrequency(44100)
+          .audioFrequency(48000)
           .output(outputPath);
 
         command
@@ -1584,7 +1730,7 @@ class FFmpegService {
       return new Promise((resolve, reject) => {
         try {
           const command = ffmpeg();
-          const SAMPLE_RATE = 44100;
+          const SAMPLE_RATE = 48000;
           const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
           // Input 0: full original track

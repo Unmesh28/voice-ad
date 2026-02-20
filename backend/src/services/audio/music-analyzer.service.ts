@@ -94,7 +94,7 @@ async function extractEnergyCurve(
 
   // Fallback: use FFmpeg astats with periodic reset to get RMS values
   try {
-    const resetFrames = Math.round(44100 * intervalMs / 1000);
+    const resetFrames = Math.round(48000 * intervalMs / 1000);
     const { stderr } = await execAsync(
       `ffmpeg -i "${filePath}" -af "astats=metadata=1:reset=${resetFrames}" -f null - 2>&1`,
       { maxBuffer: 10 * 1024 * 1024, timeout: 30000 }
