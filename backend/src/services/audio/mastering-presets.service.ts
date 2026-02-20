@@ -60,8 +60,8 @@ export function getMasteringConfig(preset: MasteringPreset): MasteringConfig {
     },
     voiceenhanced: {
       voiceVolume: 1.1,
-      musicVolume: 0.15,
-      duckingAmount: 0.45,
+      musicVolume: 0.22,
+      duckingAmount: 0.35,
       sidechainDucking: true,
       voicePresenceEQ: true,
       musicSupportEQ: true,

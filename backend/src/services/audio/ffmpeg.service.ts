@@ -158,9 +158,9 @@ class FFmpegService {
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
         // Music volume: when sidechain ducking is applied separately, use the base volume as-is.
         // When using amix-only ducking, reduce slightly so voice sits on top.
-        const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.25;
+        const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.30;
         const musicVolume = audioDucking
-          ? Math.max(0.10, baseMusicVol * (1 - duckingAmount * 0.3))
+          ? Math.max(0.20, baseMusicVol * (1 - duckingAmount * 0.15))
           : baseMusicVol;
 
         // Voice delay: when blueprint alignment says voice should enter on a
@@ -206,28 +206,41 @@ class FFmpegService {
 
         // Fades:
         // - Fade-in: tiny anti-click (0.05s). Music should hit at full volume immediately.
-        // - Fade-out: applies to the music tail AFTER voice ends. Duration = remaining music tail.
-        //   If music tail is 2s, fade-out is 2s. Never eats into the voiceover.
+        // - Fade-out: ONLY applied to the music tail AFTER voice ends.
+        //   fadeOutStart must be >= voiceTotalDuration so voice NEVER gets faded.
+        //   If there's < 0.3s of tail after voice, skip fade entirely.
         const fadeIn = Math.max(0.02, Math.min(0.15, voiceInput.fadeIn ?? 0.05));
-        const remainingTail = Math.max(0.5, mixDuration - voiceTotalDuration);
-        const fadeOut = Math.min(remainingTail, voiceInput.fadeOut ?? 2.0);
-        const fadeOutStart = Math.max(0, mixDuration - fadeOut);
+        const actualTail = mixDuration - voiceTotalDuration;
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'exp';
         const fadeOutCurve = 'exp';
 
+        // Only apply fade-out when there's a real music tail (>0.3s after voice)
+        let fadeOut = 0;
+        let fadeOutStart = mixDuration;
+        if (actualTail > 0.3) {
+          fadeOut = Math.min(actualTail, voiceInput.fadeOut ?? 2.0);
+          // Fade starts at the voice end (or later), never before
+          fadeOutStart = Math.max(voiceTotalDuration, mixDuration - fadeOut);
+        }
+
         logger.info('Applying audio fades:', {
           fadeIn: `${fadeIn}s`,
-          fadeOut: `${fadeOut}s`,
+          fadeOut: fadeOut > 0 ? `${fadeOut}s` : 'none (no tail)',
           fadeOutStart: `${fadeOutStart}s`,
           curve: curveParam,
           mixDuration: `${mixDuration}s`,
           voiceDuration: `${voiceTotalDuration}s`,
-          musicTail: `${remainingTail}s`,
+          actualTail: `${actualTail.toFixed(2)}s`,
         });
 
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;
-        const fadeOutFilter = `afade=t=out:st=${fadeOutStart}:d=${fadeOut}:curve=${fadeOutCurve}`;
-        filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
+        if (fadeOut > 0) {
+          const fadeOutFilter = `afade=t=out:st=${fadeOutStart}:d=${fadeOut}:curve=${fadeOutCurve}`;
+          filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
+        } else {
+          // No fade-out — just apply fade-in anti-click
+          filters.push(`[mixed]${fadeInFilter}[faded]`);
+        }
 
         if (normalizeLoudness) {
           const target = Math.max(-60, Math.min(0, loudnessTargetLUFS));
