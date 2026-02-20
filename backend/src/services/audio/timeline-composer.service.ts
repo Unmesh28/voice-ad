@@ -130,7 +130,7 @@ class TimelineComposerService {
       outputPath,
       baseMusicVolume = 0.15,
       fadeIn = 0.08,
-      fadeOut = 0.4,
+      fadeOut = 2.5,
       fadeCurve = 'exp',
       normalizeLoudness = true,
       loudnessTargetLUFS = -16,
@@ -461,7 +461,7 @@ class TimelineComposerService {
       ? lastVoiceEntry.startTime + lastVoiceEntry.duration
       : cursor;
 
-    const MUSIC_TAIL = 2.0; // music plays 2s after voice ends for smooth fade-out
+    const MUSIC_TAIL = 3.5; // music extends 3.5s after voice ends for a full fade-out
 
     if (cursor > lastVoiceEnd + MUSIC_TAIL && lastVoiceEntry) {
       const newDuration = lastVoiceEnd + MUSIC_TAIL;
@@ -519,18 +519,19 @@ class TimelineComposerService {
         for (let step = 0; step < RESOLVE_STEPS; step++) {
           const stepStart = resolveStart + step * stepDuration;
           const stepEnd = stepStart + stepDuration;
-          // Fade from originalVol down to near-zero (0.1 is applyVolumeCurve min)
-          const stepVol = originalVol * (1 - ((step + 1) / RESOLVE_STEPS) * 0.9);
+          // Fade from originalVol down to 0.3 so music is still audible
+          // going into the tail, where afade handles the final fade to silence
+          const stepVol = originalVol * (1 - ((step + 1) / RESOLVE_STEPS) * 0.7);
           musicVolumeSegments.push({
             startTime: stepStart,
             endTime: stepEnd,
-            volume: Math.max(0.1, stepVol),
+            volume: Math.max(0.25, stepVol),
             behavior: 'resolving',
           });
         }
 
         logger.info(
-          `Music resolving fade: ${originalVol.toFixed(2)} → 0.1 over ${RESOLVE_DURATION}s ` +
+          `Music resolving fade: ${originalVol.toFixed(2)} → 0.25 over ${RESOLVE_DURATION}s ` +
           `(${resolveStart.toFixed(1)}s → ${originalEnd.toFixed(1)}s)`
         );
       }
