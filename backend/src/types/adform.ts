@@ -372,13 +372,13 @@ const AdFormVoiceSchema = z.object({
   voiceId: z.string().min(1),
   name: z.string().optional(),
   speed: z.number().min(0.25).max(4.0).optional(),
-  settings: z.record(z.unknown()).optional(),
+  settings: z.record(z.string(), z.unknown()).optional(),
 });
 
 const AdFormSpeechSchema = z.object({
   voice: AdFormVoiceSchema,
-  sectionVoices: z.record(AdFormVoiceSchema).optional(),
-  audience: z.record(z.string()).optional(),
+  sectionVoices: z.record(z.string(), AdFormVoiceSchema).optional(),
+  audience: z.record(z.string(), z.string()).optional(),
 });
 
 const AdFormSoundTemplateSchema = z.union([
@@ -421,7 +421,7 @@ const AdFormProductionSchema = z.object({
   soundTemplate: AdFormSoundTemplateSchema,
   masteringPreset: z.enum(MASTERING_PRESETS).optional(),
   loudnessPreset: z.enum(LOUDNESS_PRESETS).optional(),
-  sectionProperties: z.record(AdFormSectionPropertiesSchema).optional(),
+  sectionProperties: z.record(z.string(), AdFormSectionPropertiesSchema).optional(),
   timelineProperties: AdFormTimelinePropertiesSchema.optional(),
   soundEffects: z.array(AdFormSfxMarkerSchema).optional(),
 });

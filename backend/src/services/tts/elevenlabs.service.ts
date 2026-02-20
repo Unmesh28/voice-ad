@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { execSync } from 'child_process';
 import { logger } from '../../config/logger';
 import fs from 'fs';
 import path from 'path';
@@ -52,10 +53,76 @@ class ElevenLabsService {
     }
   }
 
+  // =========================================================================
+  // Curl helpers — bypass Cloudflare TLS fingerprint blocking
+  // =========================================================================
+
+  private curlGet(url: string): any {
+    try {
+      const result = execSync(
+        `curl -s "${url}" -H "xi-api-key: ${this.apiKey}" -H "Content-Type: application/json"`,
+        { timeout: 90000, encoding: 'utf-8', maxBuffer: 20 * 1024 * 1024 }
+      );
+      return JSON.parse(result);
+    } catch (err: any) {
+      logger.warn(`curl GET failed, falling back to axios: ${err.message}`);
+      return null;
+    }
+  }
+
+  private curlPostJson(url: string, body: Record<string, unknown>): any {
+    const bodyJson = JSON.stringify(body);
+    const escaped = bodyJson.replace(/'/g, "'\\''");
+    try {
+      const result = execSync(
+        `curl -s -X POST "${url}" ` +
+        `-H "xi-api-key: ${this.apiKey}" ` +
+        `-H "Content-Type: application/json" ` +
+        `-H "Accept: application/json" ` +
+        `-d '${escaped}'`,
+        { timeout: 120000, encoding: 'utf-8' }
+      );
+      return JSON.parse(result);
+    } catch (err: any) {
+      logger.warn(`curl POST JSON failed, falling back to axios: ${err.message}`);
+      return null;
+    }
+  }
+
+  private curlPostBinary(url: string, body: Record<string, unknown>): Buffer | null {
+    const bodyJson = JSON.stringify(body);
+    const escaped = bodyJson.replace(/'/g, "'\\''");
+    try {
+      const result = execSync(
+        `curl -s -X POST "${url}" ` +
+        `-H "xi-api-key: ${this.apiKey}" ` +
+        `-H "Content-Type: application/json" ` +
+        `-H "Accept: audio/mpeg" ` +
+        `-d '${escaped}'`,
+        { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
+      );
+      if (result.length > 0) return result;
+      return null;
+    } catch (err: any) {
+      logger.warn(`curl POST binary failed, falling back to axios: ${err.message}`);
+      return null;
+    }
+  }
+
   /**
-   * Get all available voices with retry logic
+   * Get all available voices with retry logic.
+   * Uses curl first (bypasses Cloudflare TLS fingerprint blocking), falls back to axios.
    */
   async getVoices(retries: number = 3): Promise<Voice[]> {
+    // Try curl first
+    const curlResult = this.curlGet(`${this.apiUrl}/voices`);
+    if (curlResult && curlResult.voices) {
+      const voices = curlResult.voices;
+      logger.info(`Retrieved ${voices.length} voices from ElevenLabs (curl)`);
+      return voices;
+    }
+
+    // Fallback to axios with retries
     let lastError: any;
 
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -66,7 +133,7 @@ class ElevenLabsService {
           headers: {
             'xi-api-key': this.apiKey,
           },
-          timeout: 90000, // Increased to 90 seconds for better reliability
+          timeout: 90000,
         });
 
         const voices = response.data.voices || [];
@@ -85,14 +152,12 @@ class ElevenLabsService {
           throw new Error('Invalid ElevenLabs API key');
         }
 
-        // If this is not the last attempt and it's a timeout, retry
         if (attempt < retries && (error.code === 'ECONNABORTED' || error.message.includes('timeout'))) {
           logger.info(`Retrying voice fetch in 2 seconds...`);
           await new Promise(resolve => setTimeout(resolve, 2000));
           continue;
         }
 
-        // If it's the last attempt or a non-timeout error, throw
         if (attempt === retries) {
           throw new Error(`Failed to fetch voices after ${retries} attempts: ${error.message}`);
         }
@@ -106,6 +171,10 @@ class ElevenLabsService {
    * Get a specific voice by ID
    */
   async getVoice(voiceId: string): Promise<Voice> {
+    // Try curl first
+    const curlResult = this.curlGet(`${this.apiUrl}/voices/${voiceId}`);
+    if (curlResult && curlResult.voice_id) return curlResult;
+
     try {
       logger.info(`Fetching voice details for ${voiceId}`);
 
@@ -113,7 +182,7 @@ class ElevenLabsService {
         headers: {
           'xi-api-key': this.apiKey,
         },
-        timeout: 60000, // Increased to 60 seconds for better reliability
+        timeout: 60000,
       });
 
       return response.data;
@@ -124,15 +193,16 @@ class ElevenLabsService {
   }
 
   /**
-   * Generate speech from text using ElevenLabs TTS
+   * Generate speech from text using ElevenLabs TTS.
+   * Uses curl first (bypasses Cloudflare), falls back to axios.
    */
   async generateSpeech(options: TTSOptions): Promise<Buffer> {
     const {
       voiceId,
       text,
-      modelId = 'eleven_v3', // Eleven V3 Alpha: Most emotionally expressive model, supports 70+ languages
+      modelId = 'eleven_v3',
       voiceSettings = {
-        stability: 0.5, // V3 requires: 0.0 (Creative), 0.5 (Natural), or 1.0 (Robust)
+        stability: 0.5,
         similarity_boost: 0.75,
         style: 0.0,
         use_speaker_boost: true,
@@ -140,20 +210,36 @@ class ElevenLabsService {
       outputFormat = 'mp3_44100_128',
     } = options;
 
-    try {
-      logger.info('Generating speech with ElevenLabs', {
-        voiceId,
-        textLength: text.length,
-        modelId,
-      });
+    logger.info('Generating speech with ElevenLabs', {
+      voiceId,
+      textLength: text.length,
+      modelId,
+    });
 
+    const body = {
+      text,
+      model_id: modelId,
+      voice_settings: voiceSettings,
+    };
+
+    // Try curl first (binary audio response)
+    const curlBuffer = this.curlPostBinary(
+      `${this.apiUrl}/text-to-speech/${voiceId}?output_format=${outputFormat}`,
+      body
+    );
+    if (curlBuffer && curlBuffer.length > 1000) {
+      logger.info('Speech generated successfully (curl)', {
+        audioSize: curlBuffer.length,
+        characters: text.length,
+      });
+      return curlBuffer;
+    }
+
+    // Fallback to axios
+    try {
       const response = await axios.post(
         `${this.apiUrl}/text-to-speech/${voiceId}`,
-        {
-          text,
-          model_id: modelId,
-          voice_settings: voiceSettings,
-        },
+        body,
         {
           headers: {
             'xi-api-key': this.apiKey,
@@ -164,7 +250,7 @@ class ElevenLabsService {
             output_format: outputFormat,
           },
           responseType: 'arraybuffer',
-          timeout: 120000, // 2 minutes timeout for long texts
+          timeout: 120000,
         }
       );
 
@@ -199,6 +285,7 @@ class ElevenLabsService {
   /**
    * Generate speech and get character-level alignment (for sentence-by-sentence composition).
    * Uses POST /v1/text-to-speech/:voice_id/with-timestamps. Returns audio + alignment or null if missing.
+   * Uses curl first (bypasses Cloudflare), falls back to axios.
    */
   async generateSpeechWithTimestamps(options: TTSOptions): Promise<SpeechWithTimestampsResult> {
     const {
@@ -214,24 +301,47 @@ class ElevenLabsService {
       outputFormat = 'mp3_44100_128',
     } = options;
 
-    try {
-      logger.info('Generating speech with timestamps (ElevenLabs)', {
-        voiceId,
-        textLength: text.length,
-        modelId,
-      });
+    logger.info('Generating speech with timestamps (ElevenLabs)', {
+      voiceId,
+      textLength: text.length,
+      modelId,
+    });
 
+    const body = {
+      text,
+      model_id: modelId,
+      voice_settings: voiceSettings,
+    };
+
+    // Try curl first (JSON response with base64 audio)
+    const curlResult = this.curlPostJson(
+      `${this.apiUrl}/text-to-speech/${voiceId}/with-timestamps?output_format=${outputFormat}`,
+      body
+    );
+
+    if (curlResult && curlResult.audio_base64) {
+      const audioBuffer = Buffer.from(curlResult.audio_base64, 'base64');
+      const alignment = curlResult.alignment ?? curlResult.normalized_alignment ?? null;
+      logger.info('Speech with timestamps generated (curl)', {
+        audioSize: audioBuffer.length,
+        characters: text.length,
+        hasAlignment: !!alignment,
+      });
+      return {
+        audioBuffer,
+        alignment: alignment && alignment.characters?.length ? alignment : null,
+      };
+    }
+
+    // Fallback to axios
+    try {
       const response = await axios.post<{
         audio_base64?: string;
         alignment?: ElevenLabsAlignment;
         normalized_alignment?: ElevenLabsAlignment;
       }>(
         `${this.apiUrl}/text-to-speech/${voiceId}/with-timestamps`,
-        {
-          text,
-          model_id: modelId,
-          voice_settings: voiceSettings,
-        },
+        body,
         {
           headers: {
             'xi-api-key': this.apiKey,
