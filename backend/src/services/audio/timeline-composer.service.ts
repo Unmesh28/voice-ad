@@ -335,10 +335,21 @@ class TimelineComposerService {
     for (let segIdx = 0; segIdx < segments.length; segIdx++) {
       const seg = segments[segIdx];
       const segStart = cursor;
-      const segEnd = cursor + seg.duration;
 
       // --- Voice ---
       const voiceResult = voiceBySegment.get(seg.segmentIndex);
+
+      // For voiceover segments, use actual voice duration instead of the
+      // LLM-planned segment duration. This eliminates dead-air gaps where
+      // only music plays between voice segments (e.g. TTS produces 12.6s
+      // for a 15s segment → 2.4s gap of silence). A small breath gap
+      // (0.3s) is added for natural spacing between sentences.
+      const BREATH_GAP = 0.3;
+      const hasVoice = voiceResult && voiceResult.filePath && voiceResult.duration > 0;
+      const effectiveDuration = hasVoice && voiceResult.duration < seg.duration
+        ? voiceResult.duration + BREATH_GAP
+        : seg.duration;
+      const segEnd = cursor + effectiveDuration;
       if (voiceResult && voiceResult.filePath) {
         timeline.push({
           type: 'voice',
