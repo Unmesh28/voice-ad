@@ -117,8 +117,17 @@ class FFmpegService {
   }
 
   /**
-   * Mix voice and music with volume-based ducking (music quieter under voice), fades, and optional loudness normalization.
-   * Uses amix only (no sidechaincompress) for maximum compatibility across FFmpeg builds.
+   * Professional radio-ad mixing: constant music bed under voice.
+   *
+   * Design principles (broadcast-standard):
+   *  1. Music plays at a FIXED low bed level throughout — no sidechain pumping,
+   *     no volume ramps. The level is set so music never competes with voice.
+   *  2. Voice sits ~12-15 dB above music for clear intelligibility.
+   *  3. Separation comes from level difference + EQ carving (done upstream),
+   *     NOT from dynamic ducking.
+   *  4. After voice ends, music continues for a short tail (1 s) with a smooth
+   *     exponential fade-out.
+   *  5. Final loudnorm pass brings the mix to broadcast target.
    */
   private async mixVoiceAndMusic(opts: {
     voiceInput: AudioInput;
@@ -139,8 +148,6 @@ class FFmpegService {
       musicInput,
       outputPath,
       outputFormat,
-      audioDucking,
-      duckingAmount,
       normalize,
       fadeCurve,
       normalizeLoudness,
@@ -156,28 +163,16 @@ class FFmpegService {
 
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
-        // Music volume: base level for when voice is absent. Sidechain handles ducking.
-        const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.25;
+
+        // Music bed level — a constant, low volume that sits well under voice.
+        // Typical professional radio ads keep music 12-15 dB below voice.
+        // A multiplier of 0.15 ≈ -16.5 dB relative to voice at 1.0.
+        const musicVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
         // musical moment. The delay is in seconds on the voice stream.
         const voiceDelaySec = voiceInput.delay ?? 0;
-
-        // Smooth intro-to-voiceover transition:
-        // During intro (before voice enters), ramp music from baseMusicVol down to
-        // ~70% of baseMusicVol. This way when the sidechain kicks in at voiceDelaySec,
-        // the music is already close to its ducked level — making the transition seamless.
-        // After the intro, hold at baseMusicVol and let sidechain handle the rest.
-        let musicVolumeFilter: string;
-        if (voiceDelaySec > 0.3) {
-          const introEnd = voiceDelaySec.toFixed(3);
-          const startVol = baseMusicVol.toFixed(4);
-          const endVol = (baseMusicVol * 0.7).toFixed(4);
-          musicVolumeFilter = `volume='if(lt(t,${introEnd}),${startVol}-(${startVol}-${endVol})*t/${introEnd},${baseMusicVol})':eval=frame`;
-        } else {
-          musicVolumeFilter = `volume=${baseMusicVol}`;
-        }
 
         // Get durations so we can compute mix length and detect music shortfall.
         const musicDuration = await this.getAudioDuration(musicInput.filePath);
@@ -204,43 +199,40 @@ class FFmpegService {
         const SAMPLE_RATE = 48000;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
-        // Voice: normalize, volume, optional delay, then compress for consistent level
+        // ── Voice chain ──────────────────────────────────────────────
+        // normalize → set volume → optional delay → gentle compression
+        // Compression evens out TTS level variations so voice stays
+        // consistently above the music bed.
         const voiceBase = voiceDelaySec > 0
           ? `[0:a]${normalizeSync},volume=${voiceVol},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
           : `[0:a]${normalizeSync},volume=${voiceVol}`;
 
         const filters: string[] = [
-          // Compress voice for consistent sidechain signal
-          `${voiceBase},acompressor=threshold=-18dB:ratio=3:attack=15:release=200[vcomp]`,
+          // Gentle voice compression: keeps level consistent without audible pumping
+          // threshold=-20dB: catches most speech, ratio=2.5: moderate leveling
+          // attack=20ms: lets transients through for natural sound
+          // release=250ms: smooth recovery, makeup=1dB: slight boost
+          `${voiceBase},acompressor=threshold=-20dB:ratio=2.5:attack=20:release=250:makeup=1dB[vmix]`,
         ];
 
-        // Music: normalize, volume ramp, and pad if shorter than mix duration.
-        // apad ensures the music track extends with silence so it doesn't cut off
-        // mid-voiceover when the music file is shorter than the voice.
+        // ── Music chain ─────────────────────────────────────────────
+        // normalize → FIXED constant volume → pad if shorter than mix.
+        // NO sidechain, NO volume ramps, NO ducking.
+        // The music stays at the same level from start to finish.
         const musicPad = musicDuration < mixDuration
           ? `,apad=whole_dur=${Math.ceil(mixDuration)}`
           : '';
 
-        if (audioDucking) {
-          // Sidechain ducking: split voice into key + mix, compress music using voice as trigger
-          filters.push(
-            `[vcomp]asplit=2[vsc][vmix]`,
-            `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mus]`,
-            // Sidechain compress: music eases down when voice is present.
-            // threshold=0.15 (~-16dBFS): only actual voiced speech triggers ducking
-            // attack=200ms: slow onset, release=800ms: smooth recovery
-            `[mus][vsc]sidechaincompress=threshold=0.15:ratio=3:attack=200:release=800[mduck]`,
-            `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
-          );
-        } else {
-          // No sidechain — music is already ducked or ducking not wanted.
-          // Just mix voice and music directly.
-          filters.push(
-            `[vcomp]anull[vmix]`,
-            `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mduck]`,
-            `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
-          );
-        }
+        filters.push(
+          `[1:a]${normalizeSync},volume=${musicVol}${musicPad}[mduck]`,
+        );
+
+        // ── Mix ─────────────────────────────────────────────────────
+        // Combine voice + music. normalize=0 preserves our carefully set levels.
+        // dropout_transition=2 avoids clicks if one stream ends slightly early.
+        filters.push(
+          `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
+        );
 
         filters.push(
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
@@ -263,14 +255,18 @@ class FFmpegService {
           fadeOutStart = voiceTotalDuration; // starts right when voice ends
         }
 
-        logger.info('Applying audio fades:', {
-          fadeIn: `${fadeIn}s`,
-          fadeOut: fadeOut > 0 ? `${fadeOut}s` : 'none (no tail)',
-          fadeOutStart: `${fadeOutStart}s`,
-          curve: curveParam,
-          mixDuration: `${mixDuration}s`,
+        logger.info('Professional mix settings:', {
+          voiceVol,
+          musicVol,
+          voiceDelay: `${voiceDelaySec}s`,
           voiceDuration: `${voiceTotalDuration}s`,
+          musicDuration: `${musicDuration.toFixed(1)}s`,
+          mixDuration: `${mixDuration}s`,
+          fadeIn: `${fadeIn}s`,
+          fadeOut: fadeOut > 0 ? `${fadeOut}s (exp)` : 'none (no tail)',
+          fadeOutStart: `${fadeOutStart}s`,
           actualTail: `${actualTail.toFixed(2)}s`,
+          approach: 'constant-bed (no sidechain)',
         });
 
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;
@@ -285,7 +281,10 @@ class FFmpegService {
         if (normalizeLoudness) {
           const target = Math.max(-60, Math.min(0, loudnessTargetLUFS));
           const tp = Math.max(-10, Math.min(0, loudnessTruePeak));
-          filters.push(`[faded]loudnorm=I=${target}:TP=${tp}:LRA=3.0[out]`);
+          // LRA=7: more permissive than mastering (LRA=3) — lets the natural
+          // dynamic range of voice-over-music breathe. The downstream mastering
+          // chain tightens it further.
+          filters.push(`[faded]loudnorm=I=${target}:TP=${tp}:LRA=7[out]`);
         } else if (normalize) {
           filters.push('[faded]volume=1.5[out]');
         } else {
