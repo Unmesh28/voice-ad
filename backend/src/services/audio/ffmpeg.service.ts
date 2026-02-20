@@ -156,12 +156,10 @@ class FFmpegService {
 
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
-        // Music volume: when sidechain ducking is applied separately, use the base volume as-is.
-        // When using amix-only ducking, reduce slightly so voice sits on top.
-        const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.30;
-        const musicVolume = audioDucking
-          ? Math.max(0.20, baseMusicVol * (1 - duckingAmount * 0.15))
-          : baseMusicVol;
+        // Music volume: lower base level; sidechain compression handles
+        // dynamic ducking when voice is present.
+        const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.22;
+        const musicVolume = baseMusicVol;
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
@@ -192,15 +190,22 @@ class FFmpegService {
         const SAMPLE_RATE = 44100;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
-        // If voice has a delay, pad it with silence so it enters on the right beat
-        const voiceFilter = voiceDelaySec > 0
-          ? `[0:a]${normalizeSync},volume=${voiceVol},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}[v]`
-          : `[0:a]${normalizeSync},volume=${voiceVol}[v]`;
+        // Voice: normalize, volume, optional delay, then compress for consistent level
+        const voiceBase = voiceDelaySec > 0
+          ? `[0:a]${normalizeSync},volume=${voiceVol},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
+          : `[0:a]${normalizeSync},volume=${voiceVol}`;
 
         const filters: string[] = [
-          voiceFilter,
-          `[1:a]${normalizeSync},volume=${musicVolume}[m]`,
-          `[v][m]amix=inputs=2:duration=longest:dropout_transition=2[mixraw]`,
+          // Compress voice for consistent sidechain signal
+          `${voiceBase},acompressor=threshold=-18dB:ratio=3:attack=15:release=200[vcomp]`,
+          // Split compressed voice: one for sidechain key, one for mix output
+          `[vcomp]asplit=2[vsc][vmix]`,
+          // Music: normalize, volume, gentle fade-in for smooth start
+          `[1:a]${normalizeSync},volume=${musicVolume},afade=t=in:st=0:d=0.8:curve=tri[mus]`,
+          // Sidechain compress: music auto-ducks when voice is present
+          `[mus][vsc]sidechaincompress=threshold=0.03:ratio=4:attack=15:release=250[mduck]`,
+          // Mix compressed voice + ducked music (no auto-normalize, loudnorm handles levels)
+          `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
         ];
 

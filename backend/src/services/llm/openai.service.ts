@@ -320,7 +320,7 @@ MUSICAL STRUCTURE (for bar-aware blueprint):
   - phraseLength: bars per musical phrase (usually 4 for pop/corporate, 2 for urgent/fast ads).
 
 - Fades: You MUST set fades.fadeInSeconds (0.08–0.12) and fades.fadeOutSeconds (0.2–0.6). Note: fadeOut is for the ENTIRE ad output (voice+music), not the music track button ending.
-- Volume: You MUST set volume.voiceVolume (0.8–1.0) and volume.musicVolume (0.15–0.30). Music should be clearly audible underneath the voice — not buried. Add volume.segments for "music_up" at open and "voice_up" at CTA when it helps.
+- Volume: You MUST set volume.voiceVolume (0.8–1.0) and volume.musicVolume (0.10–0.22). Music should sit underneath the voice as a subtle bed — sidechain compression will auto-duck it when voice plays. Add volume.segments for "music_up" at open and "voice_up" at CTA when it helps.
 - Sentence-by-sentence: Add "sentenceCues" (array of { index, musicCue, musicVolumeMultiplier, musicDirection?, musicalFunction? })—one object per sentence. musicCue = short label (hook, excitement, highlight, pause, warm, cta). musicVolumeMultiplier 0.7–1.3 so music ducks or swells per sentence. Optional musicDirection = one short phrase per sentence (e.g. swell, staccato, hold, hit on downbeat, quiet under) for the music generator. Optional musicalFunction = the structural role of this sentence: "hook" (attention-grab), "build" (rising energy), "peak" (climax), "resolve" (settling), "transition" (bridging between sections), "pause" (musical breathing point).
 
 SEGMENT-BASED AD FORMAT (adFormat — REQUIRED):
@@ -552,7 +552,7 @@ SELECTION CRITERIA:
 7. Do NOT stereotype by language — base choice on the ad's MESSAGE and emotion
 
 MIXING PARAMETERS:
-- musicVolume: 0.15-0.35 (music should be clearly audible under voice, not buried)
+- musicVolume: 0.10-0.22 (subtle music bed under voice; sidechain compression auto-ducks when voice plays)
 - duckingAmount: 0.25-0.60 (higher = more ducking when voice plays)
 - musicDelay: 0-3s of music before voice starts (pre-roll intro)
 - fadeInSeconds: 0.05-1.0 (music fade-in)
@@ -561,7 +561,7 @@ MIXING PARAMETERS:
 Respond with ONLY valid JSON:
 {
   "selectedTrack": { "filename": "exact_filename.mp3", "reasoning": "why this track" },
-  "mixingParameters": { "musicVolume": 0.15, "fadeInSeconds": 0.1, "fadeOutSeconds": 0.4, "fadeCurve": "exp", "voiceVolume": 1.0, "audioDucking": true, "duckingAmount": 0.35, "musicDelay": 1.5 }
+  "mixingParameters": { "musicVolume": 0.15, "fadeInSeconds": 0.1, "fadeOutSeconds": 0.4, "fadeCurve": "exp", "voiceVolume": 1.0, "audioDucking": true, "duckingAmount": 0.35, "musicDelay": 1.0 }
 }`;
 
     const userMessage = [
@@ -649,7 +649,7 @@ Respond with ONLY valid JSON:
         reasoning: parsed.selectedTrack?.reasoning || 'No reasoning provided',
       },
       mixingParameters: {
-        musicVolume: clampValue(parsed.mixingParameters?.musicVolume ?? 0.25, 0.12, 0.5),
+        musicVolume: clampValue(parsed.mixingParameters?.musicVolume ?? 0.18, 0.08, 0.35),
         fadeInSeconds: clampValue(parsed.mixingParameters?.fadeInSeconds ?? 0.1, 0.02, 2),
         fadeOutSeconds: clampValue(parsed.mixingParameters?.fadeOutSeconds ?? 0.4, 0.1, 2),
         fadeCurve: ['exp', 'tri', 'qsin'].includes(parsed.mixingParameters?.fadeCurve) ? parsed.mixingParameters.fadeCurve : 'exp',
@@ -673,7 +673,7 @@ Respond with ONLY valid JSON:
         reasoning: `Fallback selection based on energy level (${targetEnergy})`,
       },
       mixingParameters: {
-        musicVolume: 0.25,
+        musicVolume: 0.18,
         fadeInSeconds: 0.1,
         fadeOutSeconds: 0.4,
         fadeCurve: 'exp',
