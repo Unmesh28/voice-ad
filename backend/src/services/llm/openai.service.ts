@@ -117,10 +117,16 @@ class OpenAIService {
     input: AdProductionInput
   ): Promise<AdProductionLLMResponse> {
     const durationSeconds = input.durationSeconds ?? 30;
-    // ~2.5 words/sec at natural TTS pace (reduced from 2.8 to avoid overshoot,
-    // especially for non-English languages like Hindi where words are longer).
-    // The pipeline will adjust TTS speed post-generation if needed.
-    const targetWords = Math.round(durationSeconds * 2.5);
+    // Detect non-English scripts (Hindi, Devanagari, etc.) which have longer words
+    // and need fewer words per second to fill the same duration.
+    const promptText = (input.prompt || '').toLowerCase();
+    const hasDevanagari = /[\u0900-\u097F]/.test(input.prompt || '');
+    const hindiKeywords = /\b(hindi|हिन्दी|हिंदी|devanagari)\b/i.test(promptText);
+    const isNonEnglish = hasDevanagari || hindiKeywords;
+    // Hindi/Devanagari: ~2.0 words/sec (longer compound words, more syllables)
+    // English: ~2.5 words/sec
+    const wordsPerSecond = isNonEnglish ? 2.0 : 2.5;
+    const targetWords = Math.round(durationSeconds * wordsPerSecond);
 
     let systemPrompt = this.buildAdProductionSystemPrompt();
     const userPrompt = this.buildAdProductionUserPrompt(input, targetWords);
