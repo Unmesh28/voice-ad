@@ -283,7 +283,7 @@ class AdFormBuilderService {
     // Ad structure: [music intro: 1.5s] → [voice over music] → [music tail: 2s]
     // Music intro lets the bed establish before voice enters (standard radio technique).
     const introPadding = production.timelineProperties?.introPadding ?? 1.5;
-    const soundTail = production.timelineProperties?.soundTail ?? 2.0;
+    const soundTail = production.timelineProperties?.soundTail ?? 1.0;
     const targetDuration = state.adform.metadata?.targetDuration
       || production.timelineProperties?.forceLength
       || (totalSpeechDuration + introPadding + soundTail);
