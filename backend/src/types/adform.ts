@@ -177,11 +177,13 @@ export interface AdFormTimelineProperties {
   /** Global fade out duration */
   fadeOut?: number;
   /** Fade curve type */
-  fadeCurve?: 'linear' | 'exp' | 'qsin';
+  fadeCurve?: 'linear' | 'exp' | 'qsin' | 'log';
   /** Force total output length (seconds) */
   forceLength?: number;
-  /** Music tail after speech ends (seconds) */
+  /** Music tail after speech ends (seconds) — how long music plays after voice finishes */
   soundTail?: number;
+  /** Music-only intro padding before voice enters (seconds, default 1.5) */
+  introPadding?: number;
 }
 
 /** The production layer of an AdForm. */
@@ -412,9 +414,10 @@ const AdFormSectionPropertiesSchema = z.object({
 const AdFormTimelinePropertiesSchema = z.object({
   fadeIn: z.number().optional(),
   fadeOut: z.number().optional(),
-  fadeCurve: z.enum(['linear', 'exp', 'qsin']).optional(),
+  fadeCurve: z.enum(['linear', 'exp', 'qsin', 'log']).optional(),
   forceLength: z.number().optional(),
   soundTail: z.number().optional(),
+  introPadding: z.number().optional(),
 });
 
 const AdFormProductionSchema = z.object({
