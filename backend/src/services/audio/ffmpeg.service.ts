@@ -211,11 +211,10 @@ class FFmpegService {
           : `[0:a]${normalizeSync},volume=${voiceVol}`;
 
         const filters: string[] = [
-          // Gentle voice compression: keeps level consistent without audible pumping
-          // threshold=-20dB: catches most speech, ratio=2.5: moderate leveling
-          // attack=20ms: lets transients through for natural sound
-          // release=250ms: smooth recovery, makeup=1dB: slight boost
-          `${voiceBase},acompressor=threshold=-20dB:ratio=2.5:attack=20:release=250:makeup=1dB[vmix]`,
+          // No compression at mix stage — raw voice levels are preserved here.
+          // Compression is applied AFTER mixing, in applyMasteringChain(),
+          // which compresses the combined voice+music together for a cohesive sound.
+          `${voiceBase}[vmix]`,
         ];
 
         // ── Music chain ─────────────────────────────────────────────
