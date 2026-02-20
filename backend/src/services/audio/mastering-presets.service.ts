@@ -54,7 +54,11 @@ export function getMasteringConfig(preset: MasteringPreset): MasteringConfig {
       sidechainDucking: false,
       voicePresenceEQ: false,
       musicSupportEQ: true,
-      compression: { threshold: -18, ratio: 3, attack: 15, release: 200 },
+      // Gentle peak-catching compression only. Threshold raised to -8dB
+      // and ratio lowered to 1.5 so the compressor barely engages during
+      // normal voice+music — prevents the compressor from treating the
+      // quiet music-only intro differently from the louder voice section.
+      compression: { threshold: -8, ratio: 1.5, attack: 20, release: 250 },
       limiter: { threshold: -1, release: 80 },
       eq: { lowCut: 80 },
     },
@@ -65,7 +69,8 @@ export function getMasteringConfig(preset: MasteringPreset): MasteringConfig {
       sidechainDucking: false,
       voicePresenceEQ: true,
       musicSupportEQ: true,
-      compression: { threshold: -16, ratio: 3.5, attack: 12, release: 160 },
+      // Same approach: gentle compression to avoid intro/voice level difference
+      compression: { threshold: -8, ratio: 1.8, attack: 15, release: 200 },
       limiter: { threshold: -1, release: 60 },
       eq: { lowCut: 80 },
     },
@@ -76,7 +81,8 @@ export function getMasteringConfig(preset: MasteringPreset): MasteringConfig {
       sidechainDucking: false,
       voicePresenceEQ: false,
       musicSupportEQ: false,
-      compression: { threshold: -20, ratio: 2.5, attack: 20, release: 250 },
+      // Very gentle for music-enhanced — preserve dynamics
+      compression: { threshold: -8, ratio: 1.5, attack: 25, release: 300 },
       limiter: { threshold: -1.5, release: 80 },
       eq: { lowCut: 60 },
     },
