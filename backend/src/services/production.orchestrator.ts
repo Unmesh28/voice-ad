@@ -287,6 +287,7 @@ export class ProductionOrchestrator {
         loudnessTargetLUFS: -16,
         loudnessTruePeak: -2,
         genre: musicGenre,
+        durationSeconds: duration, // Pass target duration so mixing worker can enforce it
       };
       // Override with script metadata if available (finer control)
       if (scriptMetadata?.fades) {
@@ -396,6 +397,36 @@ export class ProductionOrchestrator {
     });
 
     logger.info(`[Pipeline ${productionId}] Per-segment TTS complete: ${ttsResult.segmentResults.length} segments, ${ttsResult.totalVoiceDuration.toFixed(1)}s total voice`);
+
+    // ── Duration enforcement: adjust segment TTS speed to match target ──
+    // Voice should fill: targetDuration minus intro padding (0.5s) and tail (2.0s)
+    const voiceTargetDuration = duration - 2.5;
+    if (voiceTargetDuration > 0 && ttsResult.totalVoiceDuration > 0) {
+      const ratio = ttsResult.totalVoiceDuration / voiceTargetDuration;
+      // Only adjust if voice is >12% too long or >20% too short.
+      // Cap atempo to 0.85–1.25 to keep speech natural.
+      if (ratio > 1.12 || ratio < 0.80) {
+        const clampedRatio = Math.max(0.85, Math.min(1.25, ratio));
+        logger.info(`[Pipeline ${productionId}] Voice duration off by ${((ratio - 1) * 100).toFixed(0)}%: ${ttsResult.totalVoiceDuration.toFixed(1)}s vs target ${voiceTargetDuration.toFixed(1)}s. Adjusting speed (atempo=${clampedRatio.toFixed(2)})`);
+
+        for (const segResult of ttsResult.segmentResults) {
+          if (segResult.filePath && segResult.duration > 0) {
+            const segTargetDur = segResult.duration / clampedRatio;
+            const adjustedPath = segResult.filePath.replace('.mp3', '_speed.mp3');
+            await ffmpegService.stretchAudioToDuration(segResult.filePath, segTargetDur, adjustedPath);
+            fs.unlinkSync(segResult.filePath);
+            fs.renameSync(adjustedPath, segResult.filePath);
+            segResult.duration = await ffmpegService.getAudioDuration(segResult.filePath);
+          }
+        }
+
+        const newTotal = ttsResult.segmentResults.reduce((s, r) => s + r.duration, 0);
+        logger.info(`[Pipeline ${productionId}] Voice duration adjusted: ${ttsResult.totalVoiceDuration.toFixed(1)}s → ${newTotal.toFixed(1)}s`);
+        ttsResult.totalVoiceDuration = newTotal;
+      } else {
+        logger.info(`[Pipeline ${productionId}] Voice duration OK: ${ttsResult.totalVoiceDuration.toFixed(1)}s (target: ${voiceTargetDuration.toFixed(1)}s, ratio: ${ratio.toFixed(2)})`);
+      }
+    }
 
     // Save TTS metadata to script for backward compat
     const absoluteTimeline = segmentTTSService.computeAbsoluteTimeline(adFormat.segments, ttsResult.segmentResults);
@@ -538,6 +569,29 @@ export class ProductionOrchestrator {
       loudnessTruePeak: -2,
     });
 
+    // ── Post-composition duration enforcement ──────────────────────────
+    // If the final composition significantly exceeds the target duration,
+    // apply atempo to compress it.
+    let finalDuration = composerResult.duration;
+    if (duration > 0 && finalDuration > duration * 1.05) {
+      const ratio = finalDuration / duration;
+      const clampedRatio = Math.min(1.25, ratio);
+      const adjustedTarget = finalDuration / clampedRatio;
+
+      logger.info(`[Pipeline ${productionId}] Post-composition duration enforcement: ${finalDuration.toFixed(1)}s exceeds target ${duration}s. Applying atempo=${clampedRatio.toFixed(2)}`);
+
+      const adjustedPath = outputPath.replace('.mp3', '_adj.mp3');
+      try {
+        await ffmpegService.stretchAudioToDuration(outputPath, adjustedTarget, adjustedPath);
+        fs.unlinkSync(outputPath);
+        fs.renameSync(adjustedPath, outputPath);
+        finalDuration = await ffmpegService.getAudioDuration(outputPath);
+        logger.info(`[Pipeline ${productionId}] Post-composition adjusted: ${finalDuration.toFixed(1)}s`);
+      } catch (atempoErr: any) {
+        logger.warn(`[Pipeline ${productionId}] Post-composition atempo failed: ${atempoErr.message}`);
+      }
+    }
+
     const productionUrl = `/uploads/productions/${outputFilename}`;
 
     // Update production as completed
@@ -545,7 +599,7 @@ export class ProductionOrchestrator {
       status: 'COMPLETED',
       progress: 100,
       outputUrl: productionUrl,
-      duration: Math.round(composerResult.duration),
+      duration: Math.round(finalDuration),
       settings: {
         prompt: scriptMetadata?.prompt,
         voiceId: selectedVoiceId,
