@@ -1,0 +1,31 @@
+{
+  "id": "retro_80s_synth_01",
+  "name": "Retro 80s Synth 1",
+  "genre": "Synthwave",
+  "mood": "Nostalgic",
+  "energy": "medium",
+  "bpm": 118,
+  "instruments": [
+    "analog synth",
+    "arpeggiated bass",
+    "gated reverb drums",
+    "pad"
+  ],
+  "tags": [
+    "synthwave",
+    "80s",
+    "retro",
+    "neon",
+    "nostalgic",
+    "electronic"
+  ],
+  "bestFor": [
+    "retro brands",
+    "gaming",
+    "tech nostalgia",
+    "neon aesthetics"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

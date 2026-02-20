@@ -1,0 +1,30 @@
+{
+  "id": "calm_acoustic_02",
+  "name": "Calm Acoustic 2",
+  "genre": "Acoustic",
+  "mood": "Warm",
+  "energy": "low",
+  "bpm": 85,
+  "instruments": [
+    "acoustic guitar",
+    "soft strings",
+    "light percussion",
+    "flute"
+  ],
+  "tags": [
+    "acoustic",
+    "warm",
+    "organic",
+    "natural",
+    "gentle"
+  ],
+  "bestFor": [
+    "food & beverage",
+    "family brands",
+    "organic products",
+    "charity"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

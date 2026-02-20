@@ -21,6 +21,8 @@ logs/
 # Uploads and temporary files
 uploads/*
 !uploads/.gitkeep
+!uploads/sound-templates/
+!uploads/sound-templates/**
 temp/
 
 # IDE

@@ -1,0 +1,30 @@
+{
+  "id": "jazz_smooth_01",
+  "name": "Jazz Smooth 1",
+  "genre": "Jazz",
+  "mood": "Smooth",
+  "energy": "low",
+  "bpm": 90,
+  "instruments": [
+    "jazz guitar",
+    "upright bass",
+    "brushed drums",
+    "saxophone"
+  ],
+  "tags": [
+    "jazz",
+    "smooth",
+    "sophisticated",
+    "lounge",
+    "elegant"
+  ],
+  "bestFor": [
+    "restaurants",
+    "wine brands",
+    "evening events",
+    "luxury lifestyle"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

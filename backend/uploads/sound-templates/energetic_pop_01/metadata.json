@@ -1,0 +1,29 @@
+{
+  "id": "energetic_pop_01",
+  "name": "Energetic Pop 1",
+  "genre": "Pop",
+  "mood": "Energetic",
+  "energy": "high",
+  "bpm": 128,
+  "instruments": [
+    "synth lead",
+    "electronic drums",
+    "bass synth",
+    "claps"
+  ],
+  "tags": [
+    "energetic",
+    "pop",
+    "upbeat",
+    "fun",
+    "bright"
+  ],
+  "bestFor": [
+    "sales events",
+    "product launches",
+    "fitness",
+    "youth brands"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15
+}

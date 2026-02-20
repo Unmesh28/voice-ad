@@ -1,0 +1,29 @@
+{
+  "id": "corporate_confident_02",
+  "name": "Corporate Confident 2",
+  "genre": "Corporate",
+  "mood": "Confident",
+  "energy": "medium",
+  "bpm": 110,
+  "instruments": [
+    "electric piano",
+    "bass guitar",
+    "brushed drums",
+    "strings"
+  ],
+  "tags": [
+    "corporate",
+    "confident",
+    "steady",
+    "authoritative"
+  ],
+  "bestFor": [
+    "finance",
+    "consulting",
+    "leadership",
+    "enterprise"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

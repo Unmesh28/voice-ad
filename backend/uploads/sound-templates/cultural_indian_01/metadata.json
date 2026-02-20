@@ -1,0 +1,31 @@
+{
+  "id": "cultural_indian_01",
+  "name": "Cultural Indian 1",
+  "genre": "Indian",
+  "mood": "Festive",
+  "energy": "high",
+  "bpm": 115,
+  "instruments": [
+    "dhol",
+    "tumbi",
+    "sitar accents",
+    "tabla"
+  ],
+  "tags": [
+    "indian",
+    "punjabi",
+    "dhol",
+    "festive",
+    "bollywood",
+    "cultural"
+  ],
+  "bestFor": [
+    "Indian brands",
+    "Diwali campaigns",
+    "Bollywood",
+    "cultural events"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}

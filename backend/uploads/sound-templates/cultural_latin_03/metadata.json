@@ -1,0 +1,30 @@
+{
+  "id": "cultural_latin_03",
+  "name": "Cultural Latin 3",
+  "genre": "Latin",
+  "mood": "Groovy",
+  "energy": "medium",
+  "bpm": 105,
+  "instruments": [
+    "congas",
+    "timbales",
+    "brass section",
+    "piano montuno"
+  ],
+  "tags": [
+    "latin",
+    "salsa",
+    "tropical",
+    "groovy",
+    "brass"
+  ],
+  "bestFor": [
+    "Latin food brands",
+    "festivals",
+    "travel",
+    "dance events"
+  ],
+  "introDuration": 5,
+  "mainDuration": 15,
+  "outroDuration": 5
+}
