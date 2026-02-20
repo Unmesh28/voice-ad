@@ -497,7 +497,7 @@ class TimelineComposerService {
     }
 
     // ── Always add a music tail after voice for smooth fade-out ───
-    const MUSIC_TAIL = 3.5; // music continues 3.5s after voice ends
+    const MUSIC_TAIL = 1.5; // music continues 1.5s after voice ends
 
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
