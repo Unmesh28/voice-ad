@@ -172,7 +172,7 @@ class FFmpegService {
         // Music intro plays at the configured volume, then drops by only
         // 15% when voice enters — subtle enough to not sound like a dip.
         const musicIntroVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
-        const musicBedVol = musicIntroVol * 0.85; // exactly 15% drop
+        const musicBedVol = musicIntroVol * 0.80; // exactly 20% drop from original
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
