@@ -179,25 +179,26 @@ class FFmpegService {
           musicVolumeFilter = `volume=${baseMusicVol}`;
         }
 
-        // Single, compatible filter chain: normalize both to same format and sample rate for proper sync, then mix.
-        // Same sample rate (48000) and stereo ensures music and speech stay sample-aligned with no drift.
-        // Get music duration so we keep the full outro music swell after voice ends.
+        // Get durations so we can compute mix length and detect music shortfall.
         const musicDuration = await this.getAudioDuration(musicInput.filePath);
         const voiceTotalDuration = voiceDuration + voiceDelaySec;
-        // Music tail = time after voice ends where music plays alone then fades out.
-        // Keep it short (1s) so the ad ends cleanly — no long music outro.
-        const musicTail = Math.max(0, musicDuration - voiceTotalDuration);
-        let mixDuration = voiceTotalDuration + Math.min(musicTail, 1.0);
+
+        // Warn if music is shorter than voice — music will pad with silence via apad.
+        if (musicDuration < voiceTotalDuration) {
+          logger.warn(`Music (${musicDuration.toFixed(1)}s) is shorter than voice+delay (${voiceTotalDuration.toFixed(1)}s) — music will be padded to cover full voiceover`);
+        }
+
+        // Mix duration: voice plays fully, then 1s music tail for clean ending.
+        // If music is shorter than voice, we still keep voice full length + 1s tail.
+        let mixDuration = voiceTotalDuration + 1.0;
 
         // Enforce maxDuration: trim the music tail to fit, but NEVER cut the voice.
         if (opts.maxDuration && opts.maxDuration > 0) {
           if (voiceTotalDuration > opts.maxDuration) {
-            // Voice itself exceeds target — let it play fully, just trim the music tail
             logger.warn(`Voice (${voiceTotalDuration.toFixed(1)}s) exceeds target duration (${opts.maxDuration}s) — keeping full voice, trimming music tail`);
-            mixDuration = voiceTotalDuration + 1.0; // 1s grace for fade-out
-          } else if (mixDuration > opts.maxDuration) {
-            // Music tail pushes past target — shorten it
-            mixDuration = opts.maxDuration;
+            mixDuration = voiceTotalDuration + 1.0;
+          } else {
+            mixDuration = Math.min(mixDuration, opts.maxDuration);
           }
         }
         const SAMPLE_RATE = 48000;
@@ -211,21 +212,39 @@ class FFmpegService {
         const filters: string[] = [
           // Compress voice for consistent sidechain signal
           `${voiceBase},acompressor=threshold=-18dB:ratio=3:attack=15:release=200[vcomp]`,
-          // Split compressed voice: one for sidechain key, one for mix output
-          `[vcomp]asplit=2[vsc][vmix]`,
-          // Music: normalize + volume ramp. During intro, music ramps down gently
-          // to meet the sidechain-ducked level so there's no jarring volume drop
-          // when the voiceover starts.
-          `[1:a]${normalizeSync},${musicVolumeFilter}[mus]`,
-          // Sidechain compress: music eases down when voice is present.
-          // threshold=0.15 (~-16dBFS): only actual voiced speech triggers ducking, not breaths/noise
-          // attack=200ms: slow onset so volume drop is gradual, not abrupt
-          // release=800ms: long recovery for smooth, natural transitions
-          `[mus][vsc]sidechaincompress=threshold=0.15:ratio=3:attack=200:release=800[mduck]`,
-          // Mix compressed voice + ducked music (no auto-normalize, loudnorm handles levels)
-          `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
-          `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
         ];
+
+        // Music: normalize, volume ramp, and pad if shorter than mix duration.
+        // apad ensures the music track extends with silence so it doesn't cut off
+        // mid-voiceover when the music file is shorter than the voice.
+        const musicPad = musicDuration < mixDuration
+          ? `,apad=whole_dur=${Math.ceil(mixDuration)}`
+          : '';
+
+        if (audioDucking) {
+          // Sidechain ducking: split voice into key + mix, compress music using voice as trigger
+          filters.push(
+            `[vcomp]asplit=2[vsc][vmix]`,
+            `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mus]`,
+            // Sidechain compress: music eases down when voice is present.
+            // threshold=0.15 (~-16dBFS): only actual voiced speech triggers ducking
+            // attack=200ms: slow onset, release=800ms: smooth recovery
+            `[mus][vsc]sidechaincompress=threshold=0.15:ratio=3:attack=200:release=800[mduck]`,
+            `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
+          );
+        } else {
+          // No sidechain — music is already ducked or ducking not wanted.
+          // Just mix voice and music directly.
+          filters.push(
+            `[vcomp]anull[vmix]`,
+            `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mduck]`,
+            `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
+          );
+        }
+
+        filters.push(
+          `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
+        );
 
         // Fades:
         // - Fade-in: tiny anti-click (0.05s).
