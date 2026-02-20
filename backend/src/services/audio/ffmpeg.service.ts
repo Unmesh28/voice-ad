@@ -258,9 +258,22 @@ class FFmpegService {
         // ── Music chain ─────────────────────────────────────────────
         // Music starts at introVol, then eases down by 15% over 2s when
         // voice enters. Gentle enough to be imperceptible as a "drop".
-        const musicPad = musicDuration < mixDuration
-          ? `,apad=whole_dur=${Math.ceil(mixDuration)}`
-          : '';
+        // When music is shorter than mixDuration, LOOP the music instead
+        // of padding with silence. apad adds silence which makes the
+        // outro tail completely inaudible. aloop replays the actual
+        // music so the fade-out has real content.
+        let musicPad = '';
+        if (musicDuration < mixDuration) {
+          const loopsNeeded = Math.ceil(mixDuration / musicDuration);
+          const sampleSize = Math.ceil(musicDuration * 48000);
+          musicPad = `,aloop=loop=${loopsNeeded - 1}:size=${sampleSize},atrim=0:${Math.ceil(mixDuration)},asetpts=PTS-STARTPTS`;
+          logger.info('Music loop extension for tail', {
+            musicDuration: musicDuration.toFixed(1),
+            mixDuration: mixDuration.toFixed(1),
+            loopsNeeded,
+            gap: (mixDuration - musicDuration).toFixed(1),
+          });
+        }
 
         let musicVolumeFilter: string;
 
@@ -320,8 +333,11 @@ class FFmpegService {
           });
         }
 
+        // Loop music FIRST (so it covers the full mixDuration), THEN apply
+        // the volume envelope. If volume is applied before loop, the looped
+        // section would repeat the intro→bed→outro ramp incorrectly.
         filters.push(
-          `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mduck]`,
+          `[1:a]${normalizeSync}${musicPad},${musicVolumeFilter}[mduck]`,
         );
 
         // ── Mix ─────────────────────────────────────────────────────
