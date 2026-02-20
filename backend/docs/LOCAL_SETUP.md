@@ -51,4 +51,4 @@ Optional for full features: `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`.
 1. From `backend`: `npm run dev` (or `npm start`).
 2. From `frontend`: `npm run dev`.
 
-The frontend proxies `/api/*` to the backend (default port 5000). If the backend isn’t running or MongoDB/Redis are down, you’ll see **ECONNREFUSED** on API calls.
+The frontend proxies `/api/*` to the backend (default port 5011). If the backend isn’t running or MongoDB/Redis are down, you’ll see **ECONNREFUSED** on API calls.

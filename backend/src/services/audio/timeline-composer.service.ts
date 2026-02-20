@@ -128,7 +128,7 @@ class TimelineComposerService {
       musicFilePath,
       sfxResults,
       outputPath,
-      baseMusicVolume = 0.20,
+      baseMusicVolume = 0.15,
       fadeIn = 0.08,
       fadeOut = 0.4,
       fadeCurve = 'exp',
@@ -211,10 +211,40 @@ class TimelineComposerService {
     const envelopedMusicPath = path.join(outputDir, `timeline_music_env_${uuidv4().slice(0, 8)}.mp3`);
     await this.applyMusicVolumeEnvelope(preparedMusicPath, musicVolumeSegments, totalDuration, envelopedMusicPath);
 
-    // The volume envelope already handles per-segment ducking (full vs ducked
-    // vs building). Sidechain ducking on top would double-duck, making music
-    // inaudibly quiet under voice. Skip sidechain — envelope is sufficient.
-    const finalMusicPath = envelopedMusicPath;
+    // 4. Apply sidechain compression: music auto-ducks when voice is present.
+    //    Uses voice → acompressor → sidechain key for sidechaincompress on music.
+    //    The volume envelope handles creative shape (full/building/resolving),
+    //    while sidechain handles dynamic real-time ducking under voice.
+    const voiceEntriesForSC = timeline.filter(
+      (e) => e.type === 'voice' && e.filePath && fs.existsSync(e.filePath)
+    );
+
+    let finalMusicPath = envelopedMusicPath;
+
+    if (voiceEntriesForSC.length > 0) {
+      try {
+        // Create combined voice reference track (all positioned voices merged)
+        const voiceRefPath = path.join(outputDir, `timeline_voice_ref_${uuidv4().slice(0, 8)}.mp3`);
+        await ffmpegService.createVoiceReference(
+          voiceEntriesForSC.map((e) => ({ filePath: e.filePath, startTime: e.startTime, volume: e.volume })),
+          totalDuration,
+          voiceRefPath
+        );
+
+        // Apply sidechain compression to music using voice as key signal
+        const sidechainedPath = path.join(outputDir, `timeline_music_sc_${uuidv4().slice(0, 8)}.mp3`);
+        await this.applySidechainToMusic(voiceRefPath, envelopedMusicPath, sidechainedPath);
+        finalMusicPath = sidechainedPath;
+
+        logger.info('Sidechain compression applied to music track');
+
+        // Cleanup voice reference temp file
+        ffmpegService.cleanupFile(voiceRefPath).catch(() => {});
+      } catch (scErr: any) {
+        logger.warn(`Sidechain compression failed, using envelope-only: ${scErr.message}`);
+        finalMusicPath = envelopedMusicPath;
+      }
+    }
 
     // 5. Compute fade-out: only fade the music tail after voice ends.
     //    fadeOutStart must be >= lastVoiceEndTime so voice is never faded.
@@ -537,14 +567,15 @@ class TimelineComposerService {
 
     switch (behavior) {
       case 'full':
-        return 1.0;
+        // Gentler intro/outro music — sidechain + fade-in smooth the start
+        return 0.45;
       case 'ducked':
-        // Music stays clearly audible under voice — not buried.
-        // With baseMusicVolume ~0.20, this gives ~0.20 (audible but not competing).
-        return Math.max(0.18, baseMusicVolume);
+        // Moderate baseline under voice — sidechain compression handles
+        // the dynamic ducking, so this doesn't need to be very low.
+        return Math.max(0.25, baseMusicVolume * 1.5);
       case 'building':
         // Start at base, will ramp up (handled in envelope)
-        return baseMusicVolume * 1.3;
+        return baseMusicVolume * 2.0;
       case 'resolving':
         return baseMusicVolume * 1.1;
       case 'accent':
@@ -703,6 +734,69 @@ class TimelineComposerService {
   }
 
   // -------------------------------------------------------------------------
+  // Step 3b: Sidechain compression (voice ducks music)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Apply sidechain compression to music using voice as the key signal.
+   *
+   * Uses the same approach as professional radio/podcast production:
+   *   1. Compress the voice reference for a consistent sidechain signal
+   *   2. Use the compressed voice as the key for sidechaincompress on music
+   *
+   * This makes the music automatically and smoothly duck whenever voice
+   * is present, and recover when voice stops.
+   */
+  private async applySidechainToMusic(
+    voiceRefPath: string,
+    musicPath: string,
+    outputPath: string
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        const command = ffmpeg();
+        command.input(voiceRefPath);  // [0:a] = voice reference
+        command.input(musicPath);     // [1:a] = enveloped music
+
+        const filters = [
+          // Compress voice reference for consistent sidechain trigger signal
+          `[0:a]${NORMALIZE_FILTER},acompressor=threshold=-18dB:ratio=3:attack=15:release=200[vcomp]`,
+          // Normalize music
+          `[1:a]${NORMALIZE_FILTER}[mus]`,
+          // Sidechain compress: music ducks when compressed voice is present
+          `[mus][vcomp]sidechaincompress=threshold=0.03:ratio=4:attack=15:release=250[out]`,
+        ];
+
+        const filterStr = filters.join(';');
+        command.complexFilter(filterStr, 'out');
+
+        command
+          .audioCodec('libmp3lame')
+          .audioBitrate('192k')
+          .audioChannels(2)
+          .audioFrequency(SAMPLE_RATE);
+        command.output(outputPath);
+
+        command
+          .on('start', (commandLine: string) => {
+            logger.debug('Sidechain FFmpeg:', commandLine.slice(0, 400));
+          })
+          .on('end', () => {
+            resolve();
+          })
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            reject(new Error(`Sidechain compression failed: ${msg}`));
+          });
+
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Step 4: Build and run the FFmpeg mix
   // -------------------------------------------------------------------------
 
@@ -757,8 +851,8 @@ class TimelineComposerService {
         const totalInputs = 1 + validEntries.length; // music + voice/sfx entries
         const filters: string[] = [];
 
-        // Normalize music input
-        filters.push(`[0:a]${NORMALIZE_FILTER}[music]`);
+        // Normalize music input with gentle fade-in for smooth start
+        filters.push(`[0:a]${NORMALIZE_FILTER},afade=t=in:st=0:d=0.8:curve=tri[music]`);
 
         // Normalize and position each voice/SFX input
         const mixLabels: string[] = ['[music]'];
@@ -782,10 +876,10 @@ class TimelineComposerService {
           mixLabels.push(`[${label}]`);
         }
 
-        // Mix all tracks together
+        // Mix all tracks together (normalize=0: sidechain handles levels, loudnorm at end)
         const mixInputStr = mixLabels.join('');
         filters.push(
-          `${mixInputStr}amix=inputs=${totalInputs}:duration=longest:dropout_transition=2[mixraw]`
+          `${mixInputStr}amix=inputs=${totalInputs}:duration=longest:dropout_transition=2:normalize=0[mixraw]`
         );
 
         // Trim to exact duration

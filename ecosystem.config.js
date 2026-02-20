@@ -24,7 +24,7 @@ module.exports = {
       max_memory_restart: '1G',
       env: {
         NODE_ENV: 'production',
-        PORT: 5000,
+        PORT: 5011,
       },
       error_file: './logs/backend-server-error.log',
       out_file: './logs/backend-server-out.log',

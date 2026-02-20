@@ -549,7 +549,7 @@ export class ProductionOrchestrator {
     const outputPath = path.join(productionsDir, outputFilename);
 
     // Resolve mix settings from LLM metadata
-    const baseMusicVolume = scriptMetadata?.volume?.musicVolume ?? 0.20;
+    const baseMusicVolume = scriptMetadata?.volume?.musicVolume ?? 0.15;
     const fadeIn = scriptMetadata?.fades?.fadeInSeconds ?? 0.08;
     const fadeOut = scriptMetadata?.fades?.fadeOutSeconds ?? 0.4;
     const fadeCurve = scriptMetadata?.fades?.curve ?? 'exp';
