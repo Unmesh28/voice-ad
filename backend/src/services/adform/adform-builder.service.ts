@@ -280,12 +280,10 @@ class AdFormBuilderService {
     // Calculate total speech duration
     const totalSpeechDuration = state.ttsFiles.reduce((sum, f) => sum + f.duration, 0);
 
-    // Professional ad structure:
-    //   [intro music only: 1.5s] → [voice over music] → [outro music swell: 3s]
-    // The intro lets the music establish before voice enters (like a radio ad).
-    // The outro lets the music swell back to full volume and fade out gracefully.
-    const introPadding = production.timelineProperties?.introPadding ?? 1.5;
-    const soundTail = production.timelineProperties?.soundTail ?? 3.0;
+    // Ad structure: [brief music intro: 0.5s] → [voice over music] → [music tail: 2s]
+    // Short intro so voice enters quickly. Music tail gives a clean ending.
+    const introPadding = production.timelineProperties?.introPadding ?? 0.5;
+    const soundTail = production.timelineProperties?.soundTail ?? 2.0;
     const targetDuration = state.adform.metadata?.targetDuration
       || production.timelineProperties?.forceLength
       || (totalSpeechDuration + introPadding + soundTail);
@@ -346,10 +344,10 @@ class AdFormBuilderService {
     }
 
     // Step 5: Mix voice + music
-    // Professional fade values: 1.5s fade-in and 3.5s fade-out with logarithmic curves
-    const fadeIn = production.timelineProperties?.fadeIn ?? 1.5;
-    const fadeOut = production.timelineProperties?.fadeOut ?? 3.5;
-    const fadeCurve = production.timelineProperties?.fadeCurve ?? 'log';
+    // Fade-in: tiny anti-click. Fade-out: applied to music tail only (never eats into voice).
+    const fadeIn = production.timelineProperties?.fadeIn ?? 0.05;
+    const fadeOut = production.timelineProperties?.fadeOut ?? 2.0;
+    const fadeCurve = production.timelineProperties?.fadeCurve ?? 'exp';
 
     const rawMixPath = path.join(state.workDir, 'mix_raw.mp3');
 

@@ -173,14 +173,21 @@ class FFmpegService {
         // Get music duration so we keep the full outro music swell after voice ends.
         const musicDuration = await this.getAudioDuration(musicInput.filePath);
         const voiceTotalDuration = voiceDuration + voiceDelaySec;
-        // Use whichever is longer: voice track or music track (music often has an outro swell)
-        let mixDuration = Math.max(voiceTotalDuration + 0.5, musicDuration);
+        // Music tail = time after voice ends where music plays alone and fades out
+        const musicTail = Math.max(0, musicDuration - voiceTotalDuration);
+        // Mix = voice duration + music tail (so voice always plays fully, music tail fades out)
+        let mixDuration = voiceTotalDuration + Math.min(musicTail, 3.0); // cap music tail at 3s
 
-        // Enforce maxDuration: if the content overflows the target ad duration,
-        // cap the mix and let the fade-out handle a graceful ending (no hard cut).
-        if (opts.maxDuration && opts.maxDuration > 0 && mixDuration > opts.maxDuration) {
-          logger.warn(`Mix duration ${mixDuration.toFixed(1)}s exceeds target ${opts.maxDuration}s — capping with graceful fade-out`);
-          mixDuration = opts.maxDuration;
+        // Enforce maxDuration: trim the music tail to fit, but NEVER cut the voice.
+        if (opts.maxDuration && opts.maxDuration > 0) {
+          if (voiceTotalDuration > opts.maxDuration) {
+            // Voice itself exceeds target — let it play fully, just trim the music tail
+            logger.warn(`Voice (${voiceTotalDuration.toFixed(1)}s) exceeds target duration (${opts.maxDuration}s) — keeping full voice, trimming music tail`);
+            mixDuration = voiceTotalDuration + 1.0; // 1s grace for fade-out
+          } else if (mixDuration > opts.maxDuration) {
+            // Music tail pushes past target — shorten it
+            mixDuration = opts.maxDuration;
+          }
         }
         const SAMPLE_RATE = 44100;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
@@ -197,18 +204,16 @@ class FFmpegService {
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
         ];
 
-        // Professional fades: smooth 1–2s fade-in and 3–5s fade-out with logarithmic curves
-        // that match human hearing perception. This prevents abrupt starts/stops.
-        const MAX_FADE_IN = 2.5;
-        const MAX_FADE_OUT = 5.0;
-        const rawFadeIn = voiceInput.fadeIn ?? 1.5;
-        const rawFadeOut = voiceInput.fadeOut ?? 3.5;
-        const fadeIn = Math.max(0.1, Math.min(MAX_FADE_IN, rawFadeIn));
-        const fadeOut = Math.max(0.5, Math.min(MAX_FADE_OUT, rawFadeOut));
+        // Fades:
+        // - Fade-in: tiny anti-click (0.05s). Music should hit at full volume immediately.
+        // - Fade-out: applies to the music tail AFTER voice ends. Duration = remaining music tail.
+        //   If music tail is 2s, fade-out is 2s. Never eats into the voiceover.
+        const fadeIn = Math.max(0.02, Math.min(0.15, voiceInput.fadeIn ?? 0.05));
+        const remainingTail = Math.max(0.5, mixDuration - voiceTotalDuration);
+        const fadeOut = Math.min(remainingTail, voiceInput.fadeOut ?? 2.0);
         const fadeOutStart = Math.max(0, mixDuration - fadeOut);
-        // Logarithmic curves match human hearing perception — sounds most natural
-        const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'log';
-        const fadeOutCurve = 'log';
+        const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'exp';
+        const fadeOutCurve = 'exp';
 
         logger.info('Applying audio fades:', {
           fadeIn: `${fadeIn}s`,
@@ -216,6 +221,8 @@ class FFmpegService {
           fadeOutStart: `${fadeOutStart}s`,
           curve: curveParam,
           mixDuration: `${mixDuration}s`,
+          voiceDuration: `${voiceTotalDuration}s`,
+          musicTail: `${remainingTail}s`,
         });
 
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;

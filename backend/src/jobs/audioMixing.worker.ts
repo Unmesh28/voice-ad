@@ -83,12 +83,12 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     const settings = (production.settings as any) || {};
     const voiceVolume = settings.voiceVolume !== undefined ? settings.voiceVolume : 1.0;
     const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.25;
-    // Professional fade values: 1.5s fade-in, 3.5s fade-out with logarithmic curves
-    const rawFadeIn = settings.fadeIn ?? 1.5;
-    const rawFadeOut = settings.fadeOut ?? 3.5;
-    const fadeIn = Math.max(0.1, Math.min(2.5, rawFadeIn));
-    const fadeOut = Math.max(0.5, Math.min(5.0, rawFadeOut));
-    const fadeCurve = (settings.fadeCurve as 'linear' | 'exp' | 'qsin' | 'log' | undefined) ?? 'log';
+    // Fade-in: tiny anti-click (0.05s). Fade-out: applied to music tail after voice ends.
+    const rawFadeIn = settings.fadeIn ?? 0.05;
+    const rawFadeOut = settings.fadeOut ?? 2.0;
+    const fadeIn = Math.max(0.02, Math.min(0.15, rawFadeIn));
+    const fadeOut = Math.max(0.5, Math.min(3.0, rawFadeOut));
+    const fadeCurve = (settings.fadeCurve as 'linear' | 'exp' | 'qsin' | 'log' | undefined) ?? 'exp';
     const audioDucking = settings.audioDucking !== false;
     const duckingAmount = settings.duckingAmount !== undefined ? Math.max(0, Math.min(1, settings.duckingAmount)) : 0.35;
     const outputFormat = settings.outputFormat || 'mp3';
