@@ -12,8 +12,8 @@ const getBackendUrl = (): string => {
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
 
-  // Use the same hostname as frontend, but port 5011 for backend
-  return `${protocol}//${hostname}:5011`;
+  // Use the same hostname as frontend, but port 5000 for backend
+  return `${protocol}//${hostname}:5000`;
 };
 
 export const BACKEND_URL = getBackendUrl();

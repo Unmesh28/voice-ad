@@ -55,7 +55,7 @@ echo -e "\n${YELLOW}Port Availability:${NC}"
 check_port 27017 "MongoDB"
 check_port 6379 "Redis"
 check_port 80 "Nginx"
-check_port 5011 "Backend API"
+check_port 5000 "Backend API"
 
 # PM2 Processes
 echo -e "\n${YELLOW}PM2 Processes:${NC}"
@@ -98,7 +98,7 @@ fi
 
 # API Health Check
 echo -e "\n${YELLOW}API Health Check:${NC}"
-api_response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5011/health 2>/dev/null)
+api_response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health 2>/dev/null)
 if [ "$api_response" = "200" ]; then
     echo -e "  ${GREEN}✓${NC} Backend API: Healthy (HTTP 200)"
 else

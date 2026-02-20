@@ -65,7 +65,7 @@ class MusicService {
     if (data.mood) formData.append('mood', data.mood);
 
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://localhost:5011/api'}/music/upload`,
+      `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/music/upload`,
       {
         method: 'POST',
         headers: {
