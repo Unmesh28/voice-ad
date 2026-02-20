@@ -164,14 +164,11 @@ class FFmpegService {
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-        // Music bed level — the level music sits at UNDER voice.
-        // A multiplier of 0.15 ≈ -16.5 dB relative to voice at 1.0.
-        const musicBedVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
+        // Music bed level — sits at 10% under voice (voice at 1.0).
+        const musicBedVol = musicInput.volume !== undefined ? musicInput.volume : 0.10;
 
-        // Intro level — barely above bed so the duck is nearly imperceptible.
-        // 1.3× is just enough to give the music a touch more presence in the
-        // intro without creating a noticeable drop when ducking starts.
-        const musicIntroVol = Math.min(musicBedVol * 1.3, 0.22);
+        // Intro level — same as bed. No volume contrast = no perceptible duck.
+        const musicIntroVol = musicBedVol;
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
@@ -221,45 +218,14 @@ class FFmpegService {
         ];
 
         // ── Music chain ─────────────────────────────────────────────
-        // Music volume strategy (smooth crossfade with voice):
-        //  • Before voice entry: play at musicIntroVol (1.3× bed — barely above)
-        //  • At voiceDelaySec: voice fades in AND music begins ease-in ramp
-        //  • Ease-in curve (quadratic): starts VERY slowly, speeds up later.
-        //    When voice first enters the music is still nearly at intro level;
-        //    by the time the voice is established the music has settled to bed.
-        //  • During voice: hold at musicBedVol (constant bed, no pumping)
+        // Music plays at a flat 10% volume throughout (no intro/bed contrast).
+        // No volume ramp needed — music level is constant, voice just enters
+        // over it. This eliminates any perceptible "volume drop then voice" feel.
         const musicPad = musicDuration < mixDuration
           ? `,apad=whole_dur=${Math.ceil(mixDuration)}`
           : '';
 
-        // Ease-in quadratic ramp: the drop is nearly invisible at first, then
-        // accelerates. At the halfway point only 25% of the drop has happened
-        // (vs 50% for linear). This means the voice has time to establish
-        // itself before the music noticeably recedes.
-        //
-        //   p = (t - rampStart) / rampDuration     (0→1 progress)
-        //   vol = introV - (introV - bedV) * p²     (quadratic ease-in)
-        //
-        //   At p=0.25 (0.5s): music has dropped only 6% of the way
-        //   At p=0.50 (1.0s): music has dropped only 25%
-        //   At p=0.75 (1.5s): music has dropped 56%
-        //   At p=1.00 (2.0s): music reaches bed level
-        let musicVolumeFilter: string;
-        const rampDuration = 2.0; // seconds — very gradual ease-in duck
-
-        if (voiceDelaySec > 0.1) {
-          const rampStart = voiceDelaySec.toFixed(3);
-          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
-          const introV = musicIntroVol.toFixed(4);
-          const bedV = musicBedVol.toFixed(4);
-          const delta = `(${introV}-${bedV})`;
-          const progress = `((t-${rampStart})/${rampDuration})`;
-          // Quadratic ease-in: vol = introV - delta * progress²
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-${delta}*${progress}*${progress},${bedV}))':eval=frame`;
-        } else {
-          // No intro delay — voice starts immediately, music goes straight to bed level
-          musicVolumeFilter = `volume=${musicBedVol}`;
-        }
+        const musicVolumeFilter = `volume=${musicBedVol}`;
 
         filters.push(
           `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mduck]`,
