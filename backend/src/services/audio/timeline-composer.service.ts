@@ -517,7 +517,10 @@ class TimelineComposerService {
     const PEAK_VOL = 0.50;
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
-    // Helper: create swell + decay segments for the tail
+    // Helper: create swell + fine-grained decay segments for the tail.
+    // Uses 10 steps with quadratic decay for a very smooth fade.
+    // applyVolumeCurve adds 0.5s linear ramps at each boundary, so
+    // the combination of many small steps + ramps ≈ continuous curve.
     const createTailSegments = (start: number, end: number) => {
       const swellEnd = start + SWELL_DUR;
       const decayDur = end - swellEnd;
@@ -528,21 +531,22 @@ class TimelineComposerService {
         volume: PEAK_VOL,
         behavior: 'full' as MusicBehavior,
       });
-      // Decay phase: split into 4 steps for a smooth staircase decay
-      // Each step is progressively quieter: 0.50 → 0.38 → 0.25 → 0.12 → ~0
+      // Decay phase: 10 fine-grained steps with quadratic curve
+      // Quadratic: vol = peak * (1 - progress)^2
+      //   → holds volume in first half, accelerates decay in second half
+      //   → matches human hearing (logarithmic perception)
       if (decayDur > 0.5) {
-        const steps = 4;
+        const steps = 10;
         const stepDur = decayDur / steps;
         for (let i = 0; i < steps; i++) {
           const stepStart = swellEnd + i * stepDur;
           const stepEnd = swellEnd + (i + 1) * stepDur;
-          // Smooth quadratic decay: vol = peak * (1 - progress)^2
-          const progress = (i + 0.5) / steps; // midpoint of step
+          const progress = (i + 0.5) / steps;
           const vol = PEAK_VOL * Math.pow(1 - progress, 2);
           musicVolumeSegments.push({
             startTime: stepStart,
             endTime: stepEnd,
-            volume: Math.max(0.01, vol),
+            volume: Math.max(0.005, vol),
             behavior: 'full' as MusicBehavior,
           });
         }
@@ -943,16 +947,13 @@ class TimelineComposerService {
         const clampedFadeIn = Math.max(0.02, Math.min(0.12, fadeIn));
         const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
 
-        // Apply loudness normalization BEFORE the fade-out, not after.
-        // loudnorm with tight LRA (3.0) compresses the fade's dynamic range,
-        // fighting the fade-out and creating pumping artifacts.
-        if (normalizeLoudness) {
-          const target = Math.max(-60, Math.min(0, loudnessTargetLUFS));
-          const tp = Math.max(-10, Math.min(0, loudnessTruePeak));
-          filters.push(`[trimmed]loudnorm=I=${target}:TP=${tp}:LRA=11.0[normed]`);
-        } else {
-          filters.push('[trimmed]volume=1.5[normed]');
-        }
+        // NO loudnorm here. Single-pass loudnorm dynamically adjusts gain
+        // and BOOSTS the quiet tail (where our volume envelope decays to 0),
+        // undoing the fade-out. Same reason mastering chain excludes it:
+        // "loudnorm can revert to dynamic mode, causing level jumps".
+        // Voice & music are already pre-normalized before mixing, so
+        // integrated loudness is already reasonable.
+        filters.push('[trimmed]anull[normed]');
 
         if (fadeOut > 0.1) {
           // Primary fade is in the volume envelope. afade is a safety net.
