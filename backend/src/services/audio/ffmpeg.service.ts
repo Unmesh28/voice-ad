@@ -210,22 +210,26 @@ class FFmpegService {
           logger.warn(`Music (${musicDuration.toFixed(1)}s) is shorter than voice+delay (${voiceTotalDuration.toFixed(1)}s) — music will be padded to cover full voiceover`);
         }
 
-        // Mix duration: voice plays fully, then 5s music tail for smooth fade-out.
+        // Mix duration: voice plays fully, then music tail for smooth fade-out.
         // The tail gives the music room to decay naturally instead of ending abruptly.
         const MUSIC_TAIL = 5.0;
         let mixDuration = voiceTotalDuration + MUSIC_TAIL;
 
-        // Enforce maxDuration: trim the music tail to fit, but NEVER cut the voice.
-        // Keep at least 2s of tail for a non-abrupt ending even when constrained.
+        // Enforce maxDuration: the tail must fit WITHIN the slot.
+        // enforceDuration() downstream hard-trims to targetDuration with a
+        // short aggressive fade, which destroys our smooth fade-out.
+        // By keeping the mix within maxDuration, we avoid that trim entirely.
         if (opts.maxDuration && opts.maxDuration > 0) {
-          if (voiceTotalDuration > opts.maxDuration) {
-            logger.warn(`Voice (${voiceTotalDuration.toFixed(1)}s) exceeds target duration (${opts.maxDuration}s) — keeping full voice, adding minimal tail`);
+          if (voiceTotalDuration >= opts.maxDuration) {
+            // Voice fills or overflows the slot — minimal 2s tail for smooth ending
+            logger.warn(`Voice (${voiceTotalDuration.toFixed(1)}s) fills target duration (${opts.maxDuration}s) — adding minimal tail`);
             mixDuration = voiceTotalDuration + 2.0;
           } else {
-            // Allow tail to extend past maxDuration — approximate duration is fine.
-            // Only cap if the tail would exceed maxDuration by a lot.
-            const maxWithTail = opts.maxDuration + MUSIC_TAIL;
-            mixDuration = Math.min(mixDuration, maxWithTail);
+            // Tail gets whatever time remains in the slot
+            const availableTail = opts.maxDuration - voiceTotalDuration;
+            const tail = Math.min(MUSIC_TAIL, Math.max(availableTail, 1.0));
+            mixDuration = voiceTotalDuration + tail;
+            logger.info(`Music tail within slot: ${tail.toFixed(1)}s (slot=${opts.maxDuration}s, voice=${voiceTotalDuration.toFixed(1)}s)`);
           }
         }
         const SAMPLE_RATE = 48000;
@@ -1301,12 +1305,12 @@ class FFmpegService {
     inputPath: string,
     outputPath: string,
     targetDuration: number,
-    fadeOutDuration: number = 1.5
+    fadeOutDuration: number = 3.0
   ): Promise<string> {
     const currentDuration = await this.getAudioDuration(inputPath);
 
-    if (Math.abs(currentDuration - targetDuration) < 0.1) {
-      // Close enough — just copy
+    if (Math.abs(currentDuration - targetDuration) < 0.5) {
+      // Close enough — just copy (allow 0.5s tolerance so mix fade isn't destroyed)
       return this.processAudio({ filePath: inputPath }, outputPath, 'mp3');
     }
 
@@ -1315,12 +1319,13 @@ class FFmpegService {
         const command = ffmpeg(inputPath);
 
         if (currentDuration > targetDuration) {
-          // Trim with fade-out at the end
+          // Trim with smooth fade-out at the end.
+          // Use 'tri' (linear) — 'exp' drops to near-silence instantly.
           const fadeStart = Math.max(0, targetDuration - fadeOutDuration);
           command.audioFilters([
             `atrim=0:${targetDuration}`,
             'asetpts=PTS-STARTPTS',
-            `afade=t=out:st=${fadeStart}:d=${fadeOutDuration}:curve=exp`,
+            `afade=t=out:st=${fadeStart}:d=${fadeOutDuration}:curve=tri`,
           ].join(','));
         } else {
           // Pad with silence to reach target duration
