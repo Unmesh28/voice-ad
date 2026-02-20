@@ -164,11 +164,12 @@ class FFmpegService {
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-        // Music bed level — sits at 10% under voice (voice at 1.0).
+        // Music bed level — where music sits under voice.
         const musicBedVol = musicInput.volume !== undefined ? musicInput.volume : 0.10;
 
-        // Intro level — same as bed. No volume contrast = no perceptible duck.
-        const musicIntroVol = musicBedVol;
+        // Intro level — 2× bed. The drop is only 50% (0.20 → 0.10),
+        // gentle enough that it doesn't feel like a hard cut.
+        const musicIntroVol = musicBedVol * 2;
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
@@ -218,14 +219,30 @@ class FFmpegService {
         ];
 
         // ── Music chain ─────────────────────────────────────────────
-        // Music plays at a flat 10% volume throughout (no intro/bed contrast).
-        // No volume ramp needed — music level is constant, voice just enters
-        // over it. This eliminates any perceptible "volume drop then voice" feel.
+        // Music starts at introVol (0.20), then at the SAME moment voice
+        // enters it begins a slow gradual ease-in ramp to bedVol (0.10).
+        // Only a 50% drop — subtle, not dramatic. Voice and ramp start
+        // simultaneously so the listener never hears "drop then voice".
         const musicPad = musicDuration < mixDuration
           ? `,apad=whole_dur=${Math.ceil(mixDuration)}`
           : '';
 
-        const musicVolumeFilter = `volume=${musicBedVol}`;
+        let musicVolumeFilter: string;
+        const rampDuration = 2.0; // seconds — very gradual
+
+        if (voiceDelaySec > 0.1) {
+          const rampStart = voiceDelaySec.toFixed(3);
+          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
+          const introV = musicIntroVol.toFixed(4);
+          const bedV = musicBedVol.toFixed(4);
+          // Ease-in quadratic: starts very slow, accelerates later.
+          // Voice establishes itself before the music drop is noticeable.
+          const delta = `(${introV}-${bedV})`;
+          const p = `((t-${rampStart})/${rampDuration})`;
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-${delta}*${p}*${p},${bedV}))':eval=frame`;
+        } else {
+          musicVolumeFilter = `volume=${musicBedVol}`;
+        }
 
         filters.push(
           `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mduck]`,
