@@ -388,7 +388,34 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     await job.updateProgress(85);
 
     // Get duration
-    const duration = await ffmpegService.getAudioDuration(outputPath);
+    let duration = await ffmpegService.getAudioDuration(outputPath);
+
+    // ── Post-mix duration enforcement ────────────────────────────────
+    // If the final mix significantly exceeds the target duration,
+    // apply atempo to compress it to fit. This catches cases where
+    // the TTS-level adjustment wasn't enough.
+    if (maxDuration && maxDuration > 0 && duration > maxDuration * 1.05) {
+      const ratio = duration / maxDuration;
+      // Only adjust up to 1.25x speed to keep audio natural
+      const clampedRatio = Math.min(1.25, ratio);
+      const adjustedTarget = duration / clampedRatio;
+
+      logger.info(`Post-mix duration enforcement: ${duration.toFixed(1)}s exceeds target ${maxDuration}s by ${((ratio - 1) * 100).toFixed(0)}%. Applying atempo=${clampedRatio.toFixed(2)}`, {
+        productionId,
+      });
+
+      const adjustedPath = outputPath.replace(/\.(mp3|wav|aac)$/, '_adj.$1');
+      try {
+        await ffmpegService.stretchAudioToDuration(outputPath, adjustedTarget, adjustedPath);
+        const fsSync = require('fs');
+        fsSync.unlinkSync(outputPath);
+        fsSync.renameSync(adjustedPath, outputPath);
+        duration = await ffmpegService.getAudioDuration(outputPath);
+        logger.info(`Post-mix adjusted: ${duration.toFixed(1)}s (target: ${maxDuration}s)`, { productionId });
+      } catch (atempoErr: any) {
+        logger.warn(`Post-mix atempo failed, keeping original: ${atempoErr.message}`, { productionId });
+      }
+    }
 
     const productionUrl = `/uploads/productions/${filename}`;
 

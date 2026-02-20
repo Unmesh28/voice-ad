@@ -1,12 +1,14 @@
 import { loadEnv } from '../config/env';
 loadEnv();
 
+import fs from 'fs';
 import { Worker, Job } from 'bullmq';
 import { ttsGenerationQueue } from '../config/redis';
 import { Script } from '../models/Script';
 import { Job as JobModel } from '../models/Job';
 import { UsageRecord } from '../models/UsageRecord';
 import elevenLabsService from '../services/tts/elevenlabs.service';
+import ffmpegService from '../services/audio/ffmpeg.service';
 import { alignmentToSentenceTimings, alignmentToWordTimings, buildAlignmentPayload } from '../utils/alignment-to-sentences';
 import { logger } from '../config/logger';
 import redisConnection from '../config/redis';
@@ -105,6 +107,51 @@ const processTTSGeneration = async (job: Job<TTSGenerationJobData>) => {
       );
       filePath = result.filePath;
       audioBuffer = result.audioBuffer;
+    }
+
+    // ── Duration enforcement ──────────────────────────────────────────
+    // When the script has a target duration (ad production pipeline),
+    // adjust voice speed with FFmpeg atempo so the voiceover fits the ad.
+    // Voice should fill: targetDuration minus music intro padding (0.5s)
+    // and sound tail (2.0s).
+    const scriptMeta = script.metadata as Record<string, unknown> | undefined;
+    const adProdJson = scriptMeta?.adProductionJson as any;
+    const targetDurationSec: number | undefined =
+      adProdJson?.context?.durationSeconds
+      || (scriptMeta?.durationSeconds as number | undefined)
+      || undefined;
+
+    if (isPipelineRun && targetDurationSec && targetDurationSec > 0) {
+      const actualDuration = await ffmpegService.getAudioDuration(filePath);
+      // Voice target: total ad duration minus intro padding (0.5s) and sound tail (2.0s)
+      const voiceTargetDuration = targetDurationSec - 2.5;
+
+      if (voiceTargetDuration > 0 && actualDuration > 0) {
+        const ratio = actualDuration / voiceTargetDuration;
+        // Adjust if voice is >12% too long or >20% too short.
+        // Cap atempo to 0.85–1.25 range to keep speech natural-sounding.
+        if (ratio > 1.12 || ratio < 0.80) {
+          const clampedRatio = Math.max(0.85, Math.min(1.25, ratio));
+          const adjustedTarget = actualDuration / clampedRatio;
+          const adjustedPath = filePath.replace('.mp3', '_speed.mp3');
+
+          await ffmpegService.stretchAudioToDuration(filePath, adjustedTarget, adjustedPath);
+
+          // Replace original with speed-adjusted version
+          fs.unlinkSync(filePath);
+          fs.renameSync(adjustedPath, filePath);
+
+          const newDuration = await ffmpegService.getAudioDuration(filePath);
+          logger.info(`TTS duration adjusted: ${actualDuration.toFixed(1)}s → ${newDuration.toFixed(1)}s (target voice: ${voiceTargetDuration.toFixed(1)}s, atempo ratio: ${clampedRatio.toFixed(2)})`, {
+            scriptId,
+            targetDurationSec,
+          });
+        } else {
+          logger.info(`TTS duration OK: ${actualDuration.toFixed(1)}s (target voice: ${voiceTargetDuration.toFixed(1)}s, ratio: ${ratio.toFixed(2)})`, {
+            scriptId,
+          });
+        }
+      }
     }
 
     await job.updateProgress(80);

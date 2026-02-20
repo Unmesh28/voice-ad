@@ -117,8 +117,10 @@ class OpenAIService {
     input: AdProductionInput
   ): Promise<AdProductionLLMResponse> {
     const durationSeconds = input.durationSeconds ?? 30;
-    // ~2.8 words/sec at natural pace so script length matches requested duration (e.g. 30s → 84 words)
-    const targetWords = Math.round(durationSeconds * 2.8);
+    // ~2.5 words/sec at natural TTS pace (reduced from 2.8 to avoid overshoot,
+    // especially for non-English languages like Hindi where words are longer).
+    // The pipeline will adjust TTS speed post-generation if needed.
+    const targetWords = Math.round(durationSeconds * 2.5);
 
     let systemPrompt = this.buildAdProductionSystemPrompt();
     const userPrompt = this.buildAdProductionUserPrompt(input, targetWords);
@@ -325,10 +327,15 @@ STEP 2: Fill in the template's segments with actual content:
 - For each segment, set: type, label, duration, voiceover (text + style or null), music (description + behavior + volume or null), sfx (description or null), transition.
 - The "script" field should contain the FULL concatenated voiceover text (all voiceover segments joined). The adFormat segments contain the per-segment breakdown.
 - Segment durations must sum to totalDuration (= context.durationSeconds).
-- music_solo segments: music is NOT null, voiceover IS null.
 - voiceover_with_music segments: both voiceover and music are NOT null.
 - sfx_hit segments: sfx is NOT null; voiceover and music are both null.
 - For culturally-targeted ads (e.g. Punjabi, Latin, Japanese), use "cultural_hook" template and set culturalStyle + instruments on music segments.
+
+CRITICAL RULE — NO MUSIC-ONLY GAPS IN THE MIDDLE:
+- music_solo segments (voiceover IS null, music plays alone) are ONLY allowed as the VERY FIRST segment (brief intro, max 1-2 seconds) or the VERY LAST segment (outro/button ending, max 2-3 seconds).
+- ALL middle segments MUST have voiceover (type = "voiceover_with_music"). The voiceover must be CONTINUOUS with NO gaps. There should be NO music_solo or silent segments between voiceover segments.
+- The listener should hear voice continuously from the first voiceover segment to the last. Music plays underneath throughout but voice never stops mid-ad.
+- If you need a musical transition between sections, do it WITH voiceover playing — use musicDirection to mark a "swell" or "transition" instead of creating a music-only gap.
 
 STEP 3: Set overallMusicDirection (genre, mood, BPM, cultural style for the whole ad) and culturalContext if applicable.
 
@@ -379,6 +386,7 @@ REQUIRED JSON KEYS:
    - templateId: classic_radio|cultural_hook|sfx_driven|storytelling|high_energy_sale|custom
    - Segment types: music_solo, voiceover_with_music, sfx_hit
    - Segment durations must sum to durationSeconds
+   - CRITICAL: music_solo segments ONLY allowed as FIRST (intro, max 1-2s) or LAST (outro, max 2-3s) segment. ALL middle segments MUST be voiceover_with_music. NO music-only gaps between voiceover segments.
 7. "sentenceCues" (optional): [{ index, musicCue, musicVolumeMultiplier (0.7-1.3) }]
 8. "mixPreset" (optional): "voiceProminent"|"balanced"|"musicEmotional"`;
   }
@@ -406,6 +414,7 @@ REQUIRED JSON KEYS:
       `5. Think like a professional Music Director: Apply the emotion-first principle. Before composing, identify the emotional journey (e.g. Frustration → Curiosity → Relief → Action). Map key sync points: brand name mention (subtle lift), key benefit (peak energy), CTA (resolve). Assign energy level (1-10) to each arc segment that serves the emotion at that moment (e.g. intro=3, peak=7, resolve=5). Ensure instrumentation density matches energy (low=sparse, high=full).`,
       `6. Add sentenceCues: one per sentence (index 0, 1, 2...), with musicCue (e.g. hook, excitement, highlight, cta), musicVolumeMultiplier (0.7–1.3), optional musicDirection (e.g. swell, staccato, hold, hit on downbeat), and musicalFunction (hook, build, peak, resolve, transition, pause).`,
       `7. REQUIRED: Output "adFormat" — choose the best template for this brief (classic_radio, cultural_hook, sfx_driven, storytelling, high_energy_sale, or "custom") and fill in each segment with content. Segment durations must sum to ${duration}s. For culturally-targeted briefs, prefer "cultural_hook" template and set culturalStyle/instruments.`,
+      `8. CRITICAL: music_solo segments are ONLY allowed as the FIRST (intro, max 1-2s) or LAST (outro) segment. ALL middle segments MUST be voiceover_with_music — voiceover must be continuous with NO gaps. Do NOT create music-only breaks between voiceover segments.`,
     ];
     if (input.tone) {
       parts.push(`- Tone: ${input.tone}`);
