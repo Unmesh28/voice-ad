@@ -164,10 +164,13 @@ class FFmpegService {
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-        // Music bed level — a constant, low volume that sits well under voice.
-        // Typical professional radio ads keep music 12-15 dB below voice.
+        // Music bed level — the level music sits at UNDER voice.
         // A multiplier of 0.15 ≈ -16.5 dB relative to voice at 1.0.
-        const musicVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
+        const musicBedVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
+
+        // Intro level — music plays louder before voice enters so it's clearly
+        // audible. We cap it at 3× bed (~+10 dB) so it never overpowers.
+        const musicIntroVol = Math.min(musicBedVol * 3, 0.45);
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
@@ -216,15 +219,37 @@ class FFmpegService {
         ];
 
         // ── Music chain ─────────────────────────────────────────────
-        // normalize → FIXED constant volume → pad if shorter than mix.
-        // NO sidechain, NO volume ramps, NO ducking.
-        // The music stays at the same level from start to finish.
+        // Music volume strategy:
+        //  • Before voice entry: play at musicIntroVol (louder, clearly audible)
+        //  • At the EXACT moment voice enters (voiceDelaySec): start a smooth
+        //    ramp DOWN to musicBedVol over 0.5s — synchronized with voice entry
+        //  • During voice: hold at musicBedVol (constant bed, no pumping)
+        //  • The ramp is simultaneous with voice, not before it.
         const musicPad = musicDuration < mixDuration
           ? `,apad=whole_dur=${Math.ceil(mixDuration)}`
           : '';
 
+        // Build volume expression for the intro→bed transition
+        let musicVolumeFilter: string;
+        const rampDuration = 0.5; // seconds for smooth transition
+
+        if (voiceDelaySec > 0.1) {
+          // Voice has an intro delay: ramp from introVol → bedVol starting at voiceDelaySec
+          const rampStart = voiceDelaySec.toFixed(3);
+          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
+          const introV = musicIntroVol.toFixed(4);
+          const bedV = musicBedVol.toFixed(4);
+          // Before rampStart: introVol
+          // rampStart → rampEnd: linear interpolation from introVol to bedVol
+          // After rampEnd: bedVol
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*(t-${rampStart})/${rampDuration},${bedV}))':eval=frame`;
+        } else {
+          // No intro delay — voice starts immediately, music goes straight to bed level
+          musicVolumeFilter = `volume=${musicBedVol}`;
+        }
+
         filters.push(
-          `[1:a]${normalizeSync},volume=${musicVol}${musicPad}[mduck]`,
+          `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mduck]`,
         );
 
         // ── Mix ─────────────────────────────────────────────────────
@@ -257,7 +282,8 @@ class FFmpegService {
 
         logger.info('Professional mix settings:', {
           voiceVol,
-          musicVol,
+          musicIntroVol: musicIntroVol.toFixed(3),
+          musicBedVol: musicBedVol.toFixed(3),
           voiceDelay: `${voiceDelaySec}s`,
           voiceDuration: `${voiceTotalDuration}s`,
           musicDuration: `${musicDuration.toFixed(1)}s`,
