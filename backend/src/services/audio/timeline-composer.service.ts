@@ -262,10 +262,10 @@ class TimelineComposerService {
     // 5. Compute fade-out: start 2s BEFORE voice ends for a gradual feel.
     //    The overlap is subtle (voice masks the music fade start), then
     //    continues smoothly through the entire tail.
-    const FADE_OVERLAP = 2.0;
+    const FADE_OVERLAP = 3.0;
     const trailingMusic = totalDuration - lastVoiceEndTime;
     const effectiveFadeOut = trailingMusic > 0.3
-      ? trailingMusic + FADE_OVERLAP  // total = overlap + tail
+      ? trailingMusic + FADE_OVERLAP  // total = overlap + tail (~13s)
       : 0; // No fade if there's no real tail
 
     // 6. Build and run the FFmpeg filter_complex
@@ -510,10 +510,10 @@ class TimelineComposerService {
     }
 
     // ── Music tail: continue after voice, then smooth fade-out ─────
-    // Keep music at its current volume after voice ends, add 3s tail,
-    // and let FFmpeg's afade handle a smooth gradual fade to silence.
+    // Keep music at its current volume after voice ends, add 10s tail,
+    // and let FFmpeg's afade (qsin curve) handle a long gradual fade.
     // No volume envelope changes in the tail — just a clean fade.
-    const MUSIC_TAIL = 7.0;
+    const MUSIC_TAIL = 10.0;
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
     if (cursor > desiredEnd && lastVoiceEntry) {
@@ -945,13 +945,14 @@ class TimelineComposerService {
         }
 
         if (fadeOut > 0.1) {
-          // fadeOut includes 2s overlap before voice ends.
-          // Clamp to 10s max (7s tail + 2s overlap + margin).
-          const clampedFadeOut = Math.max(0.1, Math.min(10.0, fadeOut));
-          // Start 2s before voice ends — overlap is masked by louder voice
-          const fadeOutStart = Math.max(0, lastVoiceEndTime - 2.0);
-          // Use 'tri' (linear) — 'exp' drops to near-silence within ~1s
-          const fadeOutCurve = 'tri';
+          // fadeOut includes 3s overlap before voice ends.
+          // Clamp to 15s max (10s tail + 3s overlap + margin).
+          const clampedFadeOut = Math.max(0.1, Math.min(15.0, fadeOut));
+          // Start 3s before voice ends — overlap is masked by louder voice
+          const fadeOutStart = Math.max(0, lastVoiceEndTime - 3.0);
+          // 'qsin' (quarter-sine) holds energy in the middle and decays
+          // gently — sounds smoother than linear to human ears.
+          const fadeOutCurve = 'qsin';
           filters.push(
             `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
             `afade=t=out:st=${fadeOutStart}:d=${clampedFadeOut}:curve=${fadeOutCurve}[faded]`

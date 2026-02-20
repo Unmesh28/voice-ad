@@ -211,9 +211,8 @@ class FFmpegService {
         }
 
         // Mix duration: voice plays fully, then music tail for smooth fade-out.
-        // The tail gives the music room to decay naturally instead of ending abruptly.
-        // 7s gives a long, professional radio-style fade.
-        const MUSIC_TAIL = 7.0;
+        // 10s gives a long, cinematic fade — music breathes and decays naturally.
+        const MUSIC_TAIL = 10.0;
         let mixDuration = voiceTotalDuration + MUSIC_TAIL;
 
         // Enforce maxDuration: the tail must fit WITHIN the slot.
@@ -295,7 +294,7 @@ class FFmpegService {
         // fade-out has a real signal to work with.
         const outroVol = Math.min(Math.max(musicIntroVol * 3.0, 0.35), 0.50);
         const outroRampStart = voiceTotalDuration.toFixed(3);
-        const outroRampDur = 2.0;
+        const outroRampDur = 3.0; // gentle 3s swell — not a sudden jump
         const outroRampEnd = (voiceTotalDuration + outroRampDur).toFixed(3);
 
         if (voiceDelaySec > 0.1) {
@@ -363,16 +362,17 @@ class FFmpegService {
         const fadeIn = Math.max(0.02, Math.min(0.15, voiceInput.fadeIn ?? 0.05));
         const actualTail = mixDuration - voiceTotalDuration;
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'tri';
-        // Use 'tri' (linear) for fade-out — 'exp' drops to silence within
-        // the first ~1s of the fade, making the rest inaudible silence.
-        // Linear gives a smooth, professional radio-style fade.
-        const fadeOutCurve = 'tri';
+        // Use 'qsin' (quarter-sine) for fade-out — holds energy in the
+        // middle of the fade and decays gently at the end. Linear ('tri')
+        // sounds abrupt because human hearing is logarithmic: a linear
+        // amplitude drop is perceived as a fast initial volume loss.
+        // 'qsin' compensates for this, giving a smooth perceived decay.
+        const fadeOutCurve = 'qsin';
 
-        // Fade-out starts 2s BEFORE voice ends and extends through the
-        // entire tail. This overlap means the fade begins subtly under the
-        // voice (voice is louder so listener doesn't notice) and continues
-        // smoothly after voice ends. Total fade = 2s overlap + tail.
-        const FADE_OVERLAP = 2.0;
+        // Fade-out starts 3s BEFORE voice ends and extends through the
+        // entire 10s tail. The overlap is masked by the louder voice,
+        // so the listener perceives a seamless ~13s gradual decay.
+        const FADE_OVERLAP = 3.0;
         let fadeOut = 0;
         let fadeOutStart = mixDuration;
         if (actualTail > 0.1) {
