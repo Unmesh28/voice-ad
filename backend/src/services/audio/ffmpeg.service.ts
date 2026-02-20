@@ -156,25 +156,38 @@ class FFmpegService {
 
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
-        // Music volume: lower base level; sidechain compression handles
-        // dynamic ducking when voice is present.
+        // Music volume: base level for when voice is absent. Sidechain handles ducking.
         const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.25;
-        const musicVolume = baseMusicVol;
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
         // musical moment. The delay is in seconds on the voice stream.
         const voiceDelaySec = voiceInput.delay ?? 0;
 
+        // Smooth intro-to-voiceover transition:
+        // During intro (before voice enters), ramp music from baseMusicVol down to
+        // ~70% of baseMusicVol. This way when the sidechain kicks in at voiceDelaySec,
+        // the music is already close to its ducked level — making the transition seamless.
+        // After the intro, hold at baseMusicVol and let sidechain handle the rest.
+        let musicVolumeFilter: string;
+        if (voiceDelaySec > 0.3) {
+          const introEnd = voiceDelaySec.toFixed(3);
+          const startVol = baseMusicVol.toFixed(4);
+          const endVol = (baseMusicVol * 0.7).toFixed(4);
+          musicVolumeFilter = `volume='if(lt(t,${introEnd}),${startVol}-(${startVol}-${endVol})*t/${introEnd},${baseMusicVol})':eval=frame`;
+        } else {
+          musicVolumeFilter = `volume=${baseMusicVol}`;
+        }
+
         // Single, compatible filter chain: normalize both to same format and sample rate for proper sync, then mix.
         // Same sample rate (48000) and stereo ensures music and speech stay sample-aligned with no drift.
         // Get music duration so we keep the full outro music swell after voice ends.
         const musicDuration = await this.getAudioDuration(musicInput.filePath);
         const voiceTotalDuration = voiceDuration + voiceDelaySec;
-        // Music tail = time after voice ends where music plays alone and fades out
+        // Music tail = time after voice ends where music plays alone then fades out.
+        // Keep it short (1s) so the ad ends cleanly — no long music outro.
         const musicTail = Math.max(0, musicDuration - voiceTotalDuration);
-        // Mix = voice duration + music tail (so voice always plays fully, music tail fades out)
-        let mixDuration = voiceTotalDuration + Math.min(musicTail, 4.0); // cap music tail at 4s for smooth fade-out
+        let mixDuration = voiceTotalDuration + Math.min(musicTail, 1.0);
 
         // Enforce maxDuration: trim the music tail to fit, but NEVER cut the voice.
         if (opts.maxDuration && opts.maxDuration > 0) {
@@ -200,10 +213,10 @@ class FFmpegService {
           `${voiceBase},acompressor=threshold=-18dB:ratio=3:attack=15:release=200[vcomp]`,
           // Split compressed voice: one for sidechain key, one for mix output
           `[vcomp]asplit=2[vsc][vmix]`,
-          // Music: normalize, volume. No fade-in here — music should start at full level
-          // immediately so the intro padding is audible. The overall mix fade-in (anti-click)
-          // handles any click artifacts at the very start.
-          `[1:a]${normalizeSync},volume=${musicVolume}[mus]`,
+          // Music: normalize + volume ramp. During intro, music ramps down gently
+          // to meet the sidechain-ducked level so there's no jarring volume drop
+          // when the voiceover starts.
+          `[1:a]${normalizeSync},${musicVolumeFilter}[mus]`,
           // Sidechain compress: music eases down when voice is present.
           // threshold=0.15 (~-16dBFS): only actual voiced speech triggers ducking, not breaths/noise
           // attack=200ms: slow onset so volume drop is gradual, not abrupt
@@ -215,22 +228,20 @@ class FFmpegService {
         ];
 
         // Fades:
-        // - Fade-in: tiny anti-click (0.05s). Music should hit at full volume immediately.
-        // - Fade-out: ONLY applied to the music tail AFTER voice ends.
-        //   fadeOutStart must be >= voiceTotalDuration so voice NEVER gets faded.
-        //   If there's < 0.3s of tail after voice, skip fade entirely.
+        // - Fade-in: tiny anti-click (0.05s).
+        // - Fade-out: smooth fade over the music tail after voice ends.
+        //   Covers the entire tail so music decays to silence by the end.
         const fadeIn = Math.max(0.02, Math.min(0.15, voiceInput.fadeIn ?? 0.05));
         const actualTail = mixDuration - voiceTotalDuration;
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'exp';
         const fadeOutCurve = 'exp';
 
-        // Only apply fade-out when there's a real music tail (>0.3s after voice)
+        // Fade-out spans the full music tail for a clean ending
         let fadeOut = 0;
         let fadeOutStart = mixDuration;
-        if (actualTail > 0.3) {
-          fadeOut = Math.min(actualTail, voiceInput.fadeOut ?? 3.0);
-          // Fade starts at the voice end (or later), never before
-          fadeOutStart = Math.max(voiceTotalDuration, mixDuration - fadeOut);
+        if (actualTail > 0.1) {
+          fadeOut = actualTail; // fade covers the entire tail
+          fadeOutStart = voiceTotalDuration; // starts right when voice ends
         }
 
         logger.info('Applying audio fades:', {
