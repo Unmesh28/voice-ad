@@ -280,11 +280,15 @@ class AdFormBuilderService {
     // Calculate total speech duration
     const totalSpeechDuration = state.ttsFiles.reduce((sum, f) => sum + f.duration, 0);
 
-    // Add sound tail for music after speech
-    const soundTail = production.timelineProperties?.soundTail ?? 1.5;
+    // Professional ad structure:
+    //   [intro music only: 1.5s] → [voice over music] → [outro music swell: 3s]
+    // The intro lets the music establish before voice enters (like a radio ad).
+    // The outro lets the music swell back to full volume and fade out gracefully.
+    const introPadding = production.timelineProperties?.introPadding ?? 1.5;
+    const soundTail = production.timelineProperties?.soundTail ?? 3.0;
     const targetDuration = state.adform.metadata?.targetDuration
       || production.timelineProperties?.forceLength
-      || (totalSpeechDuration + soundTail + 2); // +2s for intro/outro padding
+      || (totalSpeechDuration + introPadding + soundTail);
 
     // Step 1: Assemble elastic sound template
     const musicOutputPath = path.join(state.workDir, 'music_assembled.mp3');
@@ -342,11 +346,16 @@ class AdFormBuilderService {
     }
 
     // Step 5: Mix voice + music
-    const fadeIn = production.timelineProperties?.fadeIn ?? 0.08;
-    const fadeOut = production.timelineProperties?.fadeOut ?? 0.4;
-    const fadeCurve = production.timelineProperties?.fadeCurve ?? 'exp';
+    // Professional fade values: 1.5s fade-in and 3.5s fade-out with logarithmic curves
+    const fadeIn = production.timelineProperties?.fadeIn ?? 1.5;
+    const fadeOut = production.timelineProperties?.fadeOut ?? 3.5;
+    const fadeCurve = production.timelineProperties?.fadeCurve ?? 'log';
 
     const rawMixPath = path.join(state.workDir, 'mix_raw.mp3');
+
+    // Voice enters after the intro music-only padding so the music
+    // can establish before the voiceover starts (standard radio ad technique).
+    const voiceDelay = introPadding;
 
     if (config.sidechainDucking) {
       // Use frequency-aware sidechain ducking
@@ -358,7 +367,7 @@ class AdFormBuilderService {
       );
 
       await ffmpegService.mixAudio({
-        voiceInput: { filePath: voiceFilePath, volume: config.voiceVolume, fadeIn, fadeOut, fadeCurve: fadeCurve as any },
+        voiceInput: { filePath: voiceFilePath, volume: config.voiceVolume, delay: voiceDelay, fadeIn, fadeOut, fadeCurve: fadeCurve as any },
         musicInput: { filePath: duckedMusicPath, volume: config.musicVolume },
         outputPath: rawMixPath,
         audioDucking: false, // Already ducked
@@ -369,7 +378,7 @@ class AdFormBuilderService {
     } else {
       // Simple volume-based mixing
       await ffmpegService.mixAudio({
-        voiceInput: { filePath: voiceFilePath, volume: config.voiceVolume, fadeIn, fadeOut, fadeCurve: fadeCurve as any },
+        voiceInput: { filePath: voiceFilePath, volume: config.voiceVolume, delay: voiceDelay, fadeIn, fadeOut, fadeCurve: fadeCurve as any },
         musicInput: { filePath: processedMusicPath, volume: config.musicVolume },
         outputPath: rawMixPath,
         audioDucking: true,

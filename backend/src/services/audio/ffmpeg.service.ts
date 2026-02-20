@@ -9,8 +9,8 @@ import type { AudioLayer, MultiLayerMixOptions, MasteringOptions } from '../../t
 const unlinkAsync = promisify(fs.unlink);
 const execAsync = promisify(exec);
 
-/** Fade curve: linear (tri), exp, qsin – maps to FFmpeg afade curve param */
-export type FadeCurveType = 'linear' | 'exp' | 'qsin';
+/** Fade curve: linear (tri), exp, qsin, log – maps to FFmpeg afade curve param */
+export type FadeCurveType = 'linear' | 'exp' | 'qsin' | 'log';
 
 interface AudioInput {
   filePath: string;
@@ -164,8 +164,11 @@ class FFmpegService {
 
         // Single, compatible filter chain: normalize both to same format and sample rate for proper sync, then mix.
         // Same sample rate (44100) and stereo ensures music and speech stay sample-aligned with no drift.
-        const END_PADDING = 0.08;
-        const mixDuration = voiceDuration + voiceDelaySec + END_PADDING;
+        // Get music duration so we keep the full outro music swell after voice ends.
+        const musicDuration = await this.getAudioDuration(musicInput.filePath);
+        const voiceTotalDuration = voiceDuration + voiceDelaySec;
+        // Use whichever is longer: voice track or music track (music often has an outro swell)
+        const mixDuration = Math.max(voiceTotalDuration + 0.5, musicDuration);
         const SAMPLE_RATE = 44100;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
@@ -181,17 +184,18 @@ class FFmpegService {
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
         ];
 
-        // Production fades: short fade-in; longer, gentle fade-out so the end never feels cut off (use linear curve for smoother tail).
-        const MAX_FADE_IN = 0.12;
-        const MAX_FADE_OUT = 0.6;
-        const rawFadeIn = voiceInput.fadeIn ?? 0.08;
-        const rawFadeOut = voiceInput.fadeOut ?? 0.4;
-        const fadeIn = Math.max(0.02, Math.min(MAX_FADE_IN, rawFadeIn));
-        const fadeOut = Math.max(0.1, Math.min(MAX_FADE_OUT, rawFadeOut));
+        // Professional fades: smooth 1–2s fade-in and 3–5s fade-out with logarithmic curves
+        // that match human hearing perception. This prevents abrupt starts/stops.
+        const MAX_FADE_IN = 2.5;
+        const MAX_FADE_OUT = 5.0;
+        const rawFadeIn = voiceInput.fadeIn ?? 1.5;
+        const rawFadeOut = voiceInput.fadeOut ?? 3.5;
+        const fadeIn = Math.max(0.1, Math.min(MAX_FADE_IN, rawFadeIn));
+        const fadeOut = Math.max(0.5, Math.min(MAX_FADE_OUT, rawFadeOut));
         const fadeOutStart = Math.max(0, mixDuration - fadeOut);
-        const curveParam = this.fadeCurveToFFmpeg(fadeCurve);
-        // Use linear (tri) for fade-out so the tail doesn't drop too fast; keeps end smooth
-        const fadeOutCurve = 'tri';
+        // Logarithmic curves match human hearing perception — sounds most natural
+        const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'log';
+        const fadeOutCurve = 'log';
 
         logger.info('Applying audio fades:', {
           fadeIn: `${fadeIn}s`,
@@ -1017,13 +1021,13 @@ class FFmpegService {
     voicePath: string,
     outputPath: string,
     opts?: {
-      /** Compressor threshold in dB (default -20) — more aggressive for cleaner voice */
+      /** Compressor threshold in dB (default -20) */
       threshold?: number;
-      /** Compression ratio (default 8) — higher ratio for sharper ducking */
+      /** Compression ratio (default 4) — gentle ducking, not hard-limiting */
       ratio?: number;
-      /** Attack in ms (default 3) — fast grab when voice starts */
+      /** Attack in ms (default 150) — slow enough to avoid pumping artifacts */
       attack?: number;
-      /** Release in ms (default 250) — longer release for smoother recovery */
+      /** Release in ms (default 800) — long release for smooth, natural recovery */
       release?: number;
       /** Crossover low→mid frequency in Hz (default 400) */
       crossoverLow?: number;
@@ -1033,9 +1037,9 @@ class FFmpegService {
   ): Promise<string> {
     const {
       threshold = -20,
-      ratio = 8,
-      attack = 3,
-      release = 250,
+      ratio = 4,
+      attack = 150,
+      release = 800,
       crossoverLow = 400,
       crossoverHigh = 5000,
     } = opts || {};
@@ -1099,8 +1103,8 @@ class FFmpegService {
         const norm = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
         // Light compression for low-mid (voice chest resonance — duck gently)
-        const lightRatio = Math.max(2, Math.round(ratio * 0.5));
-        const lightThreshold = threshold - 5; // less sensitive
+        const lightRatio = Math.max(2, Math.round(ratio * 0.6));
+        const lightThreshold = threshold - 4; // slightly less sensitive
 
         const filters = [
           `[0:a]${norm}[music]`,
@@ -1117,15 +1121,15 @@ class FFmpegService {
 
           // Band 2: Low-mid (150–400Hz) — light sidechain compression
           `[m2]highpass=f=${xSub}:poles=2,lowpass=f=${xLowMid}:poles=2[lm_raw]`,
-          `[lm_raw][vsc1]sidechaincompress=threshold=${lightThreshold}dB:ratio=${lightRatio}:attack=${attack + 2}:release=${release}:level_sc=1:mix=0.5,volume=5.0[lowmid]`,
+          `[lm_raw][vsc1]sidechaincompress=threshold=${lightThreshold}dB:ratio=${lightRatio}:attack=${attack + 30}:release=${release + 100}:level_sc=1:mix=0.35,volume=5.0[lowmid]`,
 
-          // Band 3: Mid (400–2kHz) — heavy sidechain compression (voice fundamental)
+          // Band 3: Mid (400–2kHz) — moderate sidechain compression (voice fundamental)
           `[m3]highpass=f=${xLowMid}:poles=2,lowpass=f=${xMidHigh}:poles=2[mid_raw]`,
-          `[mid_raw][vsc2]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release}:level_sc=1:mix=0.8,volume=5.0[mid]`,
+          `[mid_raw][vsc2]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release}:level_sc=1:mix=0.6,volume=5.0[mid]`,
 
-          // Band 4: Upper-mid (2k–5kHz) — heavy sidechain compression (voice presence)
+          // Band 4: Upper-mid (2k–5kHz) — moderate sidechain compression (voice presence)
           `[m4]highpass=f=${xMidHigh}:poles=2,lowpass=f=${xAir}:poles=2[um_raw]`,
-          `[um_raw][vsc3]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release + 50}:level_sc=1:mix=0.75,volume=5.0[upmid]`,
+          `[um_raw][vsc3]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release + 200}:level_sc=1:mix=0.55,volume=5.0[upmid]`,
 
           // Band 5: Air (>5kHz) — untouched
           `[m5]highpass=f=${xAir}:poles=2,volume=5.0[air]`,
@@ -1185,7 +1189,7 @@ class FFmpegService {
         const filters = [
           `[0:a]${norm}[music]`,
           `[1:a]${norm}[voice]`,
-          `[music][voice]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release}:level_sc=1:mix=0.6[out]`,
+          `[music][voice]sidechaincompress=threshold=${threshold}dB:ratio=${ratio}:attack=${attack}:release=${release}:level_sc=1:mix=0.5[out]`,
         ];
 
         const filterStr = filters.join(';');

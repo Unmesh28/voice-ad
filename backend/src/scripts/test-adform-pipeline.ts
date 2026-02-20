@@ -142,10 +142,11 @@ function buildAdFormJson(
       masteringPreset,
       loudnessPreset,
       timelineProperties: {
-        fadeIn: 0.08,
-        fadeOut: 0.5,
-        fadeCurve: 'exp',
-        soundTail: 1.5,
+        fadeIn: 1.5,
+        fadeOut: 3.5,
+        fadeCurve: 'log',
+        soundTail: 3.0,
+        introPadding: 1.5,
       },
     },
     delivery: {
