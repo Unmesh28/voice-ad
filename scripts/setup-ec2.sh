@@ -195,10 +195,10 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 
 # Allow backend API
-ufw allow 5000/tcp
+ufw allow 5011/tcp
 
 # Allow frontend (temporary)
-ufw allow 3000/tcp
+ufw allow 3011/tcp
 
 log_warn "Firewall rules configured but NOT enabled yet"
 log_warn "To enable firewall, run: sudo ufw enable"

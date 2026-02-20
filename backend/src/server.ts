@@ -16,7 +16,7 @@ import createMusicGenerationWorker from './jobs/musicGeneration.worker';
 import createAudioMixingWorker from './jobs/audioMixing.worker';
 
 const app: Express = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5011;
 
 // Middleware
 app.use(helmet({
@@ -31,7 +31,7 @@ app.use(helmet({
 })); // Security headers with media playback support
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL || 'http://localhost:3011',
   credentials: true,
   exposedHeaders: ['Content-Length', 'Content-Type', 'Content-Range', 'Accept-Ranges'],
 }));
