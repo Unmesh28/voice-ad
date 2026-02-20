@@ -1003,7 +1003,13 @@ class FFmpegService {
           filters.push(`alimiter=limit=${limit}dB:release=${rel}`);
         }
         const target = Math.max(-60, Math.min(0, targetLoudness));
-        filters.push(`loudnorm=I=${target}:TP=-2:LRA=3`);
+        // linear=true: applies a SINGLE static gain to the whole file instead
+        // of dynamic adjustment. Without this, loudnorm boosts the quiet
+        // music-only intro and pulls down the louder voice+music section,
+        // making the music sound like it drops when voice enters.
+        // LRA=11: permissive loudness range so the natural intro→voice
+        // dynamic isn't squashed.
+        filters.push(`loudnorm=I=${target}:TP=-2:LRA=11:linear=true`);
 
         if (filters.length > 0) {
           command.audioFilters(filters);
