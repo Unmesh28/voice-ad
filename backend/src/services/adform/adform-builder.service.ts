@@ -393,39 +393,24 @@ class AdFormBuilderService {
       || production.timelineProperties?.forceLength
       || undefined;
 
-    if (config.sidechainDucking) {
-      // Use frequency-aware sidechain ducking
-      const duckedMusicPath = path.join(state.workDir, 'music_ducked.mp3');
-      await ffmpegService.applySidechainDucking(
-        processedMusicPath,
-        voiceFilePath,
-        duckedMusicPath
-      );
-
-      await ffmpegService.mixAudio({
-        voiceInput: { filePath: voiceFilePath, volume: config.voiceVolume, delay: voiceDelay, fadeIn, fadeOut, fadeCurve: fadeCurve as any },
-        musicInput: { filePath: duckedMusicPath, volume: config.musicVolume },
-        outputPath: rawMixPath,
-        audioDucking: false, // Already ducked
-        normalizeLoudness: true,
-        loudnessTargetLUFS: loudness.lufs,
-        loudnessTruePeak: loudness.truePeak,
-        maxDuration,
-      });
-    } else {
-      // Simple volume-based mixing
-      await ffmpegService.mixAudio({
-        voiceInput: { filePath: voiceFilePath, volume: config.voiceVolume, delay: voiceDelay, fadeIn, fadeOut, fadeCurve: fadeCurve as any },
-        musicInput: { filePath: processedMusicPath, volume: config.musicVolume },
-        outputPath: rawMixPath,
-        audioDucking: true,
-        duckingAmount: config.duckingAmount,
-        normalizeLoudness: true,
-        loudnessTargetLUFS: loudness.lufs,
-        loudnessTruePeak: loudness.truePeak,
-        maxDuration,
-      });
-    }
+    // Mix voice + music in a single pass. Sidechain ducking is handled inside
+    // mixAudio where the voice delay is applied correctly — the sidechain key
+    // signal is silent during the intro, so music plays at full level during
+    // the intro and only ducks when the voiceover actually starts.
+    // (Previously, a separate pre-ducking step ran applySidechainDucking on
+    // the raw voice file without delay, causing the intro to be wrongly ducked
+    // and double-ducking when mixAudio applied its own sidechain too.)
+    await ffmpegService.mixAudio({
+      voiceInput: { filePath: voiceFilePath, volume: config.voiceVolume, delay: voiceDelay, fadeIn, fadeOut, fadeCurve: fadeCurve as any },
+      musicInput: { filePath: processedMusicPath, volume: config.musicVolume },
+      outputPath: rawMixPath,
+      audioDucking: config.sidechainDucking,
+      duckingAmount: config.duckingAmount,
+      normalizeLoudness: true,
+      loudnessTargetLUFS: loudness.lufs,
+      loudnessTruePeak: loudness.truePeak,
+      maxDuration,
+    });
 
     // Step 8: Apply mastering chain
     const masteredPath = path.join(state.workDir, 'mastered.mp3');
