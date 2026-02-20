@@ -259,14 +259,11 @@ class TimelineComposerService {
       }
     }
 
-    // 5. Compute fade-out: start 2s BEFORE voice ends for a gradual feel.
-    //    The overlap is subtle (voice masks the music fade start), then
-    //    continues smoothly through the entire tail.
-    const FADE_OVERLAP = 3.0;
+    // 5. Compute fade-out: the primary fade is baked into the volume
+    //    envelope above (swell → decay to 0). afade is a safety net
+    //    covering just the tail portion.
     const trailingMusic = totalDuration - lastVoiceEndTime;
-    const effectiveFadeOut = trailingMusic > 0.3
-      ? trailingMusic + FADE_OVERLAP  // total = overlap + tail (~13s)
-      : 0; // No fade if there's no real tail
+    const effectiveFadeOut = trailingMusic > 0.3 ? trailingMusic : 0;
 
     // 6. Build and run the FFmpeg filter_complex
     await this.buildAndRunMix({
@@ -509,57 +506,70 @@ class TimelineComposerService {
       cursor = lastVoiceEnd;
     }
 
-    // ── Music tail: continue after voice, then smooth fade-out ─────
-    // Keep music at its current volume after voice ends, add 10s tail,
-    // and let FFmpeg's afade (qsin curve) handle a long gradual fade.
-    // No volume envelope changes in the tail — just a clean fade.
+    // ── Music tail: swell up then gradually fade to silence ─────────
+    // The fade is baked INTO the volume segments — not relying on afade
+    // alone. afade can be fought by loudnorm/amix, but the volume
+    // envelope directly controls the music signal amplitude.
+    //
+    // Shape: voice ends → 3s swell to 0.50 → 7s gradual decay to 0
     const MUSIC_TAIL = 10.0;
+    const SWELL_DUR = 3.0;
+    const PEAK_VOL = 0.50;
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
+    // Helper: create swell + decay segments for the tail
+    const createTailSegments = (start: number, end: number) => {
+      const swellEnd = start + SWELL_DUR;
+      const decayDur = end - swellEnd;
+      // Swell phase: bed → peak
+      musicVolumeSegments.push({
+        startTime: start,
+        endTime: Math.min(swellEnd, end),
+        volume: PEAK_VOL,
+        behavior: 'full' as MusicBehavior,
+      });
+      // Decay phase: split into 4 steps for a smooth staircase decay
+      // Each step is progressively quieter: 0.50 → 0.38 → 0.25 → 0.12 → ~0
+      if (decayDur > 0.5) {
+        const steps = 4;
+        const stepDur = decayDur / steps;
+        for (let i = 0; i < steps; i++) {
+          const stepStart = swellEnd + i * stepDur;
+          const stepEnd = swellEnd + (i + 1) * stepDur;
+          // Smooth quadratic decay: vol = peak * (1 - progress)^2
+          const progress = (i + 0.5) / steps; // midpoint of step
+          const vol = PEAK_VOL * Math.pow(1 - progress, 2);
+          musicVolumeSegments.push({
+            startTime: stepStart,
+            endTime: stepEnd,
+            volume: Math.max(0.01, vol),
+            behavior: 'full' as MusicBehavior,
+          });
+        }
+      }
+    };
+
     if (cursor > desiredEnd && lastVoiceEntry) {
-      // Trim trailing music that's too long, but ensure the tail portion
-      // (after voice) is at full volume for a proper outro.
+      // Trim trailing music that's too long
       for (let i = musicVolumeSegments.length - 1; i >= 0; i--) {
-        if (musicVolumeSegments[i].startTime >= desiredEnd) {
+        if (musicVolumeSegments[i].startTime >= lastVoiceEnd) {
           musicVolumeSegments.splice(i, 1);
-        } else if (musicVolumeSegments[i].startTime >= lastVoiceEnd) {
-          // Tail segment — set to full volume and clamp to desiredEnd
-          musicVolumeSegments[i].volume = 0.50;
-          musicVolumeSegments[i].behavior = 'full' as MusicBehavior;
-          musicVolumeSegments[i].endTime = desiredEnd;
         } else if (musicVolumeSegments[i].endTime > lastVoiceEnd) {
-          // Segment straddles voice end — cap at voice end
           musicVolumeSegments[i].endTime = lastVoiceEnd;
         }
       }
-      // Ensure there's a full-volume segment for the tail
-      const hasTailSeg = musicVolumeSegments.some((s) => s.startTime >= lastVoiceEnd);
-      if (!hasTailSeg && lastVoiceEnd < desiredEnd) {
-        musicVolumeSegments.push({
-          startTime: lastVoiceEnd,
-          endTime: desiredEnd,
-          volume: 0.50,
-          behavior: 'full' as MusicBehavior,
-        });
-      }
-      logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s (tail at full volume)`);
+      createTailSegments(lastVoiceEnd, desiredEnd);
+      logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s (swell + decay envelope)`);
       cursor = desiredEnd;
     } else if (cursor < desiredEnd) {
-      // End the last (ducked) segment at the voice end, then add a NEW
-      // full-volume segment for the outro tail. This makes the music swell
-      // back to full after voice ends — not stay at quiet ducked level.
+      // End the last segment at voice end, add swell + decay
       const lastMvs = musicVolumeSegments[musicVolumeSegments.length - 1];
       if (lastMvs) {
         lastMvs.endTime = lastVoiceEnd;
       }
-      musicVolumeSegments.push({
-        startTime: lastVoiceEnd,
-        endTime: desiredEnd,
-        volume: 0.50, // Full music volume for outro
-        behavior: 'full' as MusicBehavior,
-      });
+      createTailSegments(lastVoiceEnd, desiredEnd);
       logger.info(
-        `Music tail: voice ends ${lastVoiceEnd.toFixed(1)}s, music swells to full (0.50) and continues to ${desiredEnd.toFixed(1)}s (+${MUSIC_TAIL}s fade-out)`
+        `Music tail: voice ends ${lastVoiceEnd.toFixed(1)}s, swell to ${PEAK_VOL} then decay to 0 over ${MUSIC_TAIL}s`
       );
       cursor = desiredEnd;
     }
@@ -945,13 +955,11 @@ class TimelineComposerService {
         }
 
         if (fadeOut > 0.1) {
-          // fadeOut includes 3s overlap before voice ends.
-          // Clamp to 15s max (10s tail + 3s overlap + margin).
-          const clampedFadeOut = Math.max(0.1, Math.min(15.0, fadeOut));
-          // Start 3s before voice ends — overlap is masked by louder voice
-          const fadeOutStart = Math.max(0, lastVoiceEndTime - 3.0);
-          // 'qsin' (quarter-sine) holds energy in the middle and decays
-          // gently — sounds smoother than linear to human ears.
+          // Primary fade is in the volume envelope. afade is a safety net.
+          const clampedFadeOut = Math.max(0.1, Math.min(12.0, fadeOut));
+          // Start when voice ends — envelope already handles the decay
+          const fadeOutStart = lastVoiceEndTime;
+          // 'qsin' (quarter-sine) — smooth perceived decay
           const fadeOutCurve = 'qsin';
           filters.push(
             `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
