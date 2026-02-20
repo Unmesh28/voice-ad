@@ -165,11 +165,10 @@ class FFmpegService {
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
         // Music bed level — where music sits under voice.
-        const musicBedVol = musicInput.volume !== undefined ? musicInput.volume : 0.10;
+        const musicBedVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
 
-        // Intro level — 2× bed. The drop is only 50% (0.20 → 0.10),
-        // gentle enough that it doesn't feel like a hard cut.
-        const musicIntroVol = musicBedVol * 2;
+        // Intro level — barely above bed. Only ~25% drop (0.20 → 0.15).
+        const musicIntroVol = musicBedVol * 1.35;
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
