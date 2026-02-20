@@ -567,8 +567,8 @@ class TimelineComposerService {
 
     switch (behavior) {
       case 'full':
-        // Gentler intro/outro music — sidechain + fade-in smooth the start
-        return 0.45;
+        // Lower starting volume so sidechain duck isn't a dramatic drop
+        return 0.30;
       case 'ducked':
         // Moderate baseline under voice — sidechain compression handles
         // the dynamic ducking, so this doesn't need to be very low.
@@ -763,8 +763,11 @@ class TimelineComposerService {
           `[0:a]${NORMALIZE_FILTER},acompressor=threshold=-18dB:ratio=3:attack=15:release=200[vcomp]`,
           // Normalize music
           `[1:a]${NORMALIZE_FILTER}[mus]`,
-          // Sidechain compress: music ducks when compressed voice is present
-          `[mus][vcomp]sidechaincompress=threshold=0.03:ratio=4:attack=15:release=250[out]`,
+          // Sidechain compress: music eases down when voice is present.
+          // attack=200ms: slow onset so music fades down gradually (not a hard drop)
+          // release=500ms: slow recovery so music comes back smoothly after voice pauses
+          // threshold=0.05: slightly less sensitive trigger
+          `[mus][vcomp]sidechaincompress=threshold=0.05:ratio=4:attack=200:release=500[out]`,
         ];
 
         const filterStr = filters.join(';');
