@@ -224,14 +224,17 @@ class FFmpegService {
           : '';
 
         let musicVolumeFilter: string;
-        const rampDuration = 2.0; // seconds
+        const rampDuration = 5.0; // seconds — slow, gradual ease-down
 
         if (voiceDelaySec > 0.1) {
-          const rampStart = voiceDelaySec.toFixed(3);
-          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
+          // Start the ramp BEFORE voice enters so they overlap:
+          // music is already easing down as voice fades in on top.
+          const rampLeadIn = Math.min(1.0, voiceDelaySec * 0.5); // start up to 1s early
+          const rampStart = Math.max(0, voiceDelaySec - rampLeadIn).toFixed(3);
+          const rampEnd = (voiceDelaySec - rampLeadIn + rampDuration).toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          // Linear ramp from introVol to bedVol (only 15% difference)
+          // Slow linear ramp from introVol to bedVol, overlapping with voice entry
           musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),${bedV}))':eval=frame`;
         } else {
           musicVolumeFilter = `volume=${musicBedVol}`;
