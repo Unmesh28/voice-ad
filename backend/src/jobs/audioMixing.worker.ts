@@ -81,6 +81,11 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
 
     // Get settings (fadeIn/fadeOut from LLM or defaults)
     const settings = (production.settings as any) || {};
+
+    logger.info(`=== [WORKER STEP 1] RAW SETTINGS FROM DB for production ${productionId} ===`, {
+      rawSettings: JSON.stringify(settings, null, 2),
+    });
+
     const voiceVolume = settings.voiceVolume !== undefined ? settings.voiceVolume : 1.0;
     const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.25;
     // Fade-in: tiny anti-click (0.05s). Fade-out: applied to music tail after voice ends.
@@ -104,6 +109,19 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       settings.loudnessTruePeak !== undefined
         ? settings.loudnessTruePeak
         : -2;
+
+    logger.info(`=== [WORKER STEP 2] RESOLVED MIX PARAMETERS for production ${productionId} ===`, {
+      voiceVolume,
+      musicVolume,
+      musicVolumeSource: settings.musicVolume !== undefined ? 'from DB settings' : 'DEFAULT (0.25)',
+      fadeIn,
+      fadeOut,
+      fadeCurve,
+      audioDucking,
+      duckingAmount,
+      normalizeLoudness,
+      loudnessTargetLUFS,
+    });
 
     // Generate output filename
     const filename = `production_${production.id}_${uuidv4()}.${outputFormat}`;
@@ -296,10 +314,25 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       settings.durationSeconds ?? scriptMetadata?.durationSeconds ?? scriptMetadata?.productionContext?.durationSeconds ?? undefined;
 
     // Mix audio
-    logger.info(`Mixing audio for production ${productionId}`, {
-      voiceDelay: voiceDelaySec.toFixed(2),
-      hasAlignment: !!alignmentResult,
+    logger.info(`=== [WORKER STEP 3] CALLING ffmpegService.mixAudio for production ${productionId} ===`, {
+      voiceInput: voicePath ? {
+        filePath: voicePath,
+        volume: voiceVolume,
+        delay: voiceDelaySec > 0 ? voiceDelaySec : undefined,
+        fadeIn,
+        fadeOut,
+        fadeCurve,
+      } : 'NONE',
+      musicInput: finalMusicPath ? {
+        filePath: finalMusicPath,
+        volume: musicVolume,
+      } : 'NONE',
+      audioDucking: alignmentResult ? false : audioDucking,
+      duckingAmount,
       maxDuration,
+      hasAlignment: !!alignmentResult,
+      voiceDelay: `${voiceDelaySec.toFixed(2)}s`,
+      explanation: `Music will start at volume=${musicVolume}, then in FFmpeg it becomes introVol=${musicVolume}, bedVol=${(musicVolume * 0.80).toFixed(4)} (20% drop). Voice enters at ${voiceDelaySec.toFixed(2)}s.`,
     });
     await ffmpegService.mixAudio({
       voiceInput: voicePath ? {
