@@ -299,18 +299,13 @@ class FFmpegService {
           filters.push(`[mixed]${fadeInFilter}[faded]`);
         }
 
-        if (normalizeLoudness) {
-          const target = Math.max(-60, Math.min(0, loudnessTargetLUFS));
-          const tp = Math.max(-10, Math.min(0, loudnessTruePeak));
-          // LRA=7: more permissive than mastering (LRA=3) — lets the natural
-          // dynamic range of voice-over-music breathe. The downstream mastering
-          // chain tightens it further.
-          filters.push(`[faded]loudnorm=I=${target}:TP=${tp}:LRA=7[out]`);
-        } else if (normalize) {
-          filters.push('[faded]volume=1.5[out]');
-        } else {
-          filters.push('[faded]anull[out]');
-        }
+        // Skip loudnorm at mix stage — it dynamically adjusts levels and
+        // causes the music to sound loud in the intro then drop when voice
+        // enters (loudnorm boosts the quiet intro, then pulls down when the
+        // louder voice+music signal hits). The mastering chain applies
+        // loudnorm on the final output where it works correctly on the
+        // complete signal.
+        filters.push('[faded]anull[out]');
 
         const filterStr = filters.join(';');
         command.complexFilter(filterStr, 'out');
