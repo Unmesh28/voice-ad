@@ -166,13 +166,27 @@ class FFmpegService {
         command.input(voiceInput.filePath);
         command.input(musicInput.filePath);
 
+        logger.info('=== [STEP 1] INPUT FILES ===', {
+          voiceFile: voiceInput.filePath,
+          musicFile: musicInput.filePath,
+        });
+
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
         // Music intro plays at the configured volume, then drops by only
-        // 15% when voice enters — subtle enough to not sound like a dip.
+        // 20% when voice enters — subtle enough to not sound like a dip.
         const musicIntroVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
         const musicBedVol = musicIntroVol * 0.80; // exactly 20% drop from original
+
+        logger.info('=== [STEP 2] VOLUME SETTINGS ===', {
+          voiceVolumeInput: voiceInput.volume,
+          voiceVolumeUsed: voiceVol,
+          musicVolumeInput: musicInput.volume,
+          musicIntroVol: musicIntroVol.toFixed(4),
+          musicBedVol: musicBedVol.toFixed(4),
+          musicDropPercent: `${((1 - musicBedVol / musicIntroVol) * 100).toFixed(1)}% reduction from intro`,
+        });
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
@@ -182,6 +196,14 @@ class FFmpegService {
         // Get durations so we can compute mix length and detect music shortfall.
         const musicDuration = await this.getAudioDuration(musicInput.filePath);
         const voiceTotalDuration = voiceDuration + voiceDelaySec;
+
+        logger.info('=== [STEP 3] DURATIONS & DELAY ===', {
+          voiceDuration: `${voiceDuration.toFixed(2)}s`,
+          voiceDelaySec: `${voiceDelaySec.toFixed(2)}s`,
+          voiceTotalDuration: `${voiceTotalDuration.toFixed(2)}s`,
+          musicDuration: `${musicDuration.toFixed(2)}s`,
+          voiceDelayInput: voiceInput.delay,
+        });
 
         // Warn if music is shorter than voice — music will pad with silence via apad.
         if (musicDuration < voiceTotalDuration) {
@@ -216,6 +238,13 @@ class FFmpegService {
           ? `[0:a]${normalizeSync},volume=${voiceVol},${voiceFade},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
           : `[0:a]${normalizeSync},volume=${voiceVol},${voiceFade}`;
 
+        logger.info('=== [STEP 5] VOICE CHAIN ===', {
+          voiceVolume: voiceVol,
+          voiceEntryFade: `${voiceEntryFade}s`,
+          voiceDelay: voiceDelaySec > 0 ? `${voiceDelaySec.toFixed(2)}s (${Math.round(voiceDelaySec * 1000)}ms)` : 'none',
+          voiceFilter: voiceBase,
+        });
+
         const filters: string[] = [
           // No compression at mix stage — applied in applyMasteringChain().
           `${voiceBase}[vmix]`,
@@ -247,8 +276,25 @@ class FFmpegService {
           const bedV = musicBedVol.toFixed(4);
           // Smooth ramp: music eases down over 1 bar, voice enters right at the end
           musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),${bedV}))':eval=frame`;
+
+          logger.info('=== [STEP 4] MUSIC VOLUME RAMP (gradual) ===', {
+            mode: 'gradual_ramp',
+            barDuration: barDur > 0.5 ? `${barDur.toFixed(2)}s (from BPM)` : 'none (using 4s default)',
+            rampDuration: `${rampDuration.toFixed(2)}s`,
+            rampStart: `${rampStart}s (music at introVol before this)`,
+            rampEnd: `${rampEnd}s (music at bedVol after this, voice starts here)`,
+            musicVolBefore: `${introV} (intro volume)`,
+            musicVolAfter: `${bedV} (bed volume = ${((1 - musicBedVol / musicIntroVol) * 100).toFixed(1)}% lower)`,
+            timeline: `0s→${rampStart}s: music at ${introV} | ${rampStart}s→${rampEnd}s: smooth ramp ${introV}→${bedV} | ${rampEnd}s+: music at ${bedV}, voice playing`,
+          });
         } else {
           musicVolumeFilter = `volume=${musicBedVol}`;
+
+          logger.info('=== [STEP 4] MUSIC VOLUME (flat, no ramp) ===', {
+            mode: 'flat_no_delay',
+            reason: `voiceDelaySec=${voiceDelaySec.toFixed(3)}s is <= 0.1s, no room for ramp`,
+            musicVolume: `${musicBedVol.toFixed(4)} (bed volume throughout)`,
+          });
         }
 
         filters.push(
@@ -316,6 +362,22 @@ class FFmpegService {
         filters.push('[faded]anull[out]');
 
         const filterStr = filters.join(';');
+
+        logger.info('=== [STEP 6] COMPLETE FILTER CHAIN ===', {
+          totalFilters: filters.length,
+          filterChain: filters,
+          fullFilterString: filterStr,
+        });
+
+        logger.info('=== [STEP 7] MIX SUMMARY ===', {
+          musicPlaysAloneFor: voiceDelaySec > 0 ? `${voiceDelaySec.toFixed(2)}s at volume ${musicIntroVol.toFixed(4)}` : '0s (voice starts immediately)',
+          musicRampsDown: voiceDelaySec > 0.1 ? `from ${musicIntroVol.toFixed(4)} → ${musicBedVol.toFixed(4)} over ${rampDuration.toFixed(2)}s` : 'no ramp (instant)',
+          voiceStartsAt: `${voiceDelaySec.toFixed(2)}s`,
+          musicUnderVoice: `volume ${musicBedVol.toFixed(4)}`,
+          totalMixDuration: `${mixDuration.toFixed(2)}s`,
+          outputPath,
+        });
+
         command.complexFilter(filterStr, 'out');
         this.setOutputOptions(command, outputFormat);
         command.output(outputPath);

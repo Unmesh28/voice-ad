@@ -272,6 +272,21 @@ export class ProductionOrchestrator {
       // Stage 4: Mix Audio – use LLM-selected mixing parameters from music selection
       logger.info(`[Pipeline ${productionId}] Stage 4: Mixing audio`);
       const mp = musicSelection.mixingParameters;
+
+      logger.info(`=== [ORCHESTRATOR] LLM MIXING PARAMETERS for production ${productionId} ===`, {
+        llmVoiceVolume: mp.voiceVolume,
+        llmMusicVolume: mp.musicVolume,
+        llmFadeIn: mp.fadeInSeconds,
+        llmFadeOut: mp.fadeOutSeconds,
+        llmFadeCurve: mp.fadeCurve,
+        llmAudioDucking: mp.audioDucking,
+        llmDuckingAmount: mp.duckingAmount,
+        llmMusicDelay: mp.musicDelay,
+        scriptMetadataVolume: scriptMetadata?.volume ? JSON.stringify(scriptMetadata.volume) : 'none',
+        scriptMetadataFades: scriptMetadata?.fades ? JSON.stringify(scriptMetadata.fades) : 'none',
+        scriptMetadataMixPreset: scriptMetadata?.mixPreset ?? 'none',
+      });
+
       const mixSettings: Record<string, unknown> = {
         voiceVolume: mp.voiceVolume,
         musicVolume: mp.musicVolume,
@@ -309,6 +324,17 @@ export class ProductionOrchestrator {
         };
         mixSettings.duckingAmount = presetDucking[scriptMetadata.mixPreset] ?? mp.duckingAmount;
       }
+
+      logger.info(`=== [ORCHESTRATOR] FINAL MIX SETTINGS SAVED for production ${productionId} ===`, {
+        finalVoiceVolume: mixSettings.voiceVolume,
+        finalMusicVolume: mixSettings.musicVolume,
+        finalFadeIn: mixSettings.fadeIn,
+        finalFadeOut: mixSettings.fadeOut,
+        finalFadeCurve: mixSettings.fadeCurve,
+        finalDuckingAmount: mixSettings.duckingAmount,
+        finalMixPreset: mixSettings.mixPreset ?? 'none',
+        note: `musicVolume=${mixSettings.musicVolume} will be used as introVol in FFmpeg. bedVol will be ${((mixSettings.musicVolume as number) * 0.80).toFixed(4)} (20% drop)`,
+      });
 
       const productionDoc = await Production.findById(productionId).lean();
       const existingSettings = (productionDoc?.settings as Record<string, unknown>) || {};
