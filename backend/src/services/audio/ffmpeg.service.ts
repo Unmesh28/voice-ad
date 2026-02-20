@@ -230,23 +230,22 @@ class FFmpegService {
 
         // Build volume expression for the intro→bed transition
         let musicVolumeFilter: string;
-        const rampDuration = 0.8; // longer ramp for smoother transition
-        // Pre-ramp: start music duck BEFORE voice enters so the two overlap.
-        // Without this, music drops and THEN voice appears — sounds like two
-        // separate pieces glued together. With a 0.3s head start the music is
-        // already fading as the voice comes in, creating a seamless crossfade.
-        const preRampOffset = 0.3; // seconds before voice entry to begin ducking
+        const rampDuration = 1.0; // gentle 1s ramp for smooth duck
+        // Post-entry duck: voice starts OVER full-volume music, then music
+        // gradually fades underneath. This avoids the "music drops then voice
+        // appears" problem — instead the voice naturally emerges over the
+        // music and the bed settles down around it.
+        const postEntryDelay = 0.2; // seconds AFTER voice entry before duck begins
 
         if (voiceDelaySec > 0.1) {
-          // Music ramp begins preRampOffset before voice entry (clamped to 0)
-          const rampStart = Math.max(0, voiceDelaySec - preRampOffset).toFixed(3);
-          const rampEnd = (parseFloat(rampStart) + rampDuration).toFixed(3);
+          // Music stays at introVol until voice has been speaking for postEntryDelay,
+          // then ramps down to bedVol over rampDuration.
+          const rampStart = (voiceDelaySec + postEntryDelay).toFixed(3);
+          const rampEnd = (voiceDelaySec + postEntryDelay + rampDuration).toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          // Before rampStart: introVol (full intro level)
+          // Before rampStart: introVol (music still loud, voice already playing)
           // rampStart → rampEnd: smooth ramp from introVol to bedVol
-          //   — the voice enters ~0.3s into this ramp, so music is already
-          //     partially ducked when speech begins (overlap/crossfade feel)
           // After rampEnd: bedVol (constant bed under voice)
           musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*(t-${rampStart})/${rampDuration},${bedV}))':eval=frame`;
         } else {
