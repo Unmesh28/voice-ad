@@ -210,17 +210,22 @@ class FFmpegService {
           logger.warn(`Music (${musicDuration.toFixed(1)}s) is shorter than voice+delay (${voiceTotalDuration.toFixed(1)}s) — music will be padded to cover full voiceover`);
         }
 
-        // Mix duration: voice plays fully, then 1s music tail for clean ending.
-        // If music is shorter than voice, we still keep voice full length + 1s tail.
-        let mixDuration = voiceTotalDuration + 1.0;
+        // Mix duration: voice plays fully, then 5s music tail for smooth fade-out.
+        // The tail gives the music room to decay naturally instead of ending abruptly.
+        const MUSIC_TAIL = 5.0;
+        let mixDuration = voiceTotalDuration + MUSIC_TAIL;
 
         // Enforce maxDuration: trim the music tail to fit, but NEVER cut the voice.
+        // Keep at least 2s of tail for a non-abrupt ending even when constrained.
         if (opts.maxDuration && opts.maxDuration > 0) {
           if (voiceTotalDuration > opts.maxDuration) {
-            logger.warn(`Voice (${voiceTotalDuration.toFixed(1)}s) exceeds target duration (${opts.maxDuration}s) — keeping full voice, trimming music tail`);
-            mixDuration = voiceTotalDuration + 1.0;
+            logger.warn(`Voice (${voiceTotalDuration.toFixed(1)}s) exceeds target duration (${opts.maxDuration}s) — keeping full voice, adding minimal tail`);
+            mixDuration = voiceTotalDuration + 2.0;
           } else {
-            mixDuration = Math.min(mixDuration, opts.maxDuration);
+            // Allow tail to extend past maxDuration — approximate duration is fine.
+            // Only cap if the tail would exceed maxDuration by a lot.
+            const maxWithTail = opts.maxDuration + MUSIC_TAIL;
+            mixDuration = Math.min(mixDuration, maxWithTail);
           }
         }
         const SAMPLE_RATE = 48000;
