@@ -271,6 +271,13 @@ class FFmpegService {
         const barDur = opts.barDuration ?? 0;
         const rampDuration = barDur > 0.5 ? barDur : 4.0;
 
+        // Outro ramp: after voice ends, music swells back to full volume
+        // over 1.5s so the tail/fade-out is clearly audible — not stuck at
+        // the quiet bed level. voiceTotalDuration = voiceDuration + delay.
+        const outroRampStart = voiceTotalDuration.toFixed(3);
+        const outroRampDur = 1.5;
+        const outroRampEnd = (voiceTotalDuration + outroRampDur).toFixed(3);
+
         if (voiceDelaySec > 0.1) {
           // Start ramp 1 bar (or rampDuration) before voice enters so
           // music is already at bed level when voice hits the downbeat.
@@ -279,26 +286,37 @@ class FFmpegService {
           const rampEnd = voiceDelaySec.toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          // Smooth ramp: music eases down over 1 bar, voice enters right at the end
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),${bedV}))':eval=frame`;
+          // Three-phase volume: intro → duck under voice → swell back for outro
+          // Phase 1: 0 → rampStart:  introVol (full music)
+          // Phase 2: rampStart → rampEnd: ramp introVol → bedVol
+          // Phase 3: rampEnd → outroRampStart: bedVol (ducked under voice)
+          // Phase 4: outroRampStart → outroRampEnd: ramp bedVol → introVol
+          // Phase 5: outroRampEnd → end: introVol (full music for fade-out)
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),if(lt(t,${outroRampStart}),${bedV},if(lt(t,${outroRampEnd}),${bedV}+(${introV}-${bedV})*((t-${outroRampStart})/${outroRampDur}),${introV}))))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME RAMP (gradual) ===', {
-            mode: 'gradual_ramp',
+          logger.info('=== [STEP 4] MUSIC VOLUME RAMP (gradual with outro) ===', {
+            mode: 'gradual_ramp_with_outro',
             barDuration: barDur > 0.5 ? `${barDur.toFixed(2)}s (from BPM)` : 'none (using 4s default)',
             rampDuration: `${rampDuration.toFixed(2)}s`,
             rampStart: `${rampStart}s (music at introVol before this)`,
             rampEnd: `${rampEnd}s (music at bedVol after this, voice starts here)`,
+            outroRampStart: `${outroRampStart}s (voice ends, music swells back)`,
+            outroRampEnd: `${outroRampEnd}s (music at introVol for fade-out)`,
             musicVolBefore: `${introV} (intro volume)`,
-            musicVolAfter: `${bedV} (bed volume = ${((1 - musicBedVol / musicIntroVol) * 100).toFixed(1)}% lower)`,
-            timeline: `0s→${rampStart}s: music at ${introV} | ${rampStart}s→${rampEnd}s: smooth ramp ${introV}→${bedV} | ${rampEnd}s+: music at ${bedV}, voice playing`,
+            musicVolDuring: `${bedV} (bed volume under voice)`,
+            musicVolOutro: `${introV} (back to full for outro fade)`,
           });
         } else {
-          musicVolumeFilter = `volume=${musicBedVol}`;
+          const introV = musicIntroVol.toFixed(4);
+          const bedV = musicBedVol.toFixed(4);
+          // No intro ramp, but still do the outro swell
+          musicVolumeFilter = `volume='if(lt(t,${outroRampStart}),${bedV},if(lt(t,${outroRampEnd}),${bedV}+(${introV}-${bedV})*((t-${outroRampStart})/${outroRampDur}),${introV}))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME (flat, no ramp) ===', {
-            mode: 'flat_no_delay',
-            reason: `voiceDelaySec=${voiceDelaySec.toFixed(3)}s is <= 0.1s, no room for ramp`,
-            musicVolume: `${musicBedVol.toFixed(4)} (bed volume throughout)`,
+          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed with outro ramp) ===', {
+            mode: 'flat_with_outro',
+            musicVolDuring: `${bedV} (bed volume throughout voice)`,
+            outroRampStart: `${outroRampStart}s (voice ends, music swells back)`,
+            outroRampEnd: `${outroRampEnd}s (music at ${introV} for fade-out)`,
           });
         }
 
