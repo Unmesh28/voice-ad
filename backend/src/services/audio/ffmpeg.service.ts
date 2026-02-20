@@ -164,10 +164,10 @@ class FFmpegService {
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-        // Music plays at a SINGLE constant level throughout — NO volume
-        // change when voice enters. Any perceived level difference must
-        // come from masking, not from us actually reducing the music.
-        const musicVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
+        // Music intro plays at the configured volume, then drops by only
+        // 15% when voice enters — subtle enough to not sound like a dip.
+        const musicIntroVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
+        const musicBedVol = musicIntroVol * 0.85; // exactly 15% drop
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
@@ -217,13 +217,25 @@ class FFmpegService {
         ];
 
         // ── Music chain ─────────────────────────────────────────────
-        // FLAT constant volume — no ramp, no intro/bed difference.
-        // The music level must not change at all when voice enters.
+        // Music starts at introVol, then eases down by 15% over 2s when
+        // voice enters. Gentle enough to be imperceptible as a "drop".
         const musicPad = musicDuration < mixDuration
           ? `,apad=whole_dur=${Math.ceil(mixDuration)}`
           : '';
 
-        const musicVolumeFilter = `volume=${musicVol}`;
+        let musicVolumeFilter: string;
+        const rampDuration = 2.0; // seconds
+
+        if (voiceDelaySec > 0.1) {
+          const rampStart = voiceDelaySec.toFixed(3);
+          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
+          const introV = musicIntroVol.toFixed(4);
+          const bedV = musicBedVol.toFixed(4);
+          // Linear ramp from introVol to bedVol (only 15% difference)
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),${bedV}))':eval=frame`;
+        } else {
+          musicVolumeFilter = `volume=${musicBedVol}`;
+        }
 
         filters.push(
           `[1:a]${normalizeSync},${musicVolumeFilter}${musicPad}[mduck]`,
@@ -259,7 +271,8 @@ class FFmpegService {
 
         logger.info('Professional mix settings:', {
           voiceVol,
-          musicVol: musicVol.toFixed(3),
+          musicIntroVol: musicIntroVol.toFixed(3),
+          musicBedVol: musicBedVol.toFixed(3),
           voiceDelay: `${voiceDelaySec}s`,
           voiceDuration: `${voiceTotalDuration}s`,
           musicDuration: `${musicDuration.toFixed(1)}s`,
