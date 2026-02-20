@@ -288,14 +288,14 @@ class FFmpegService {
         const barDur = opts.barDuration ?? 0;
         const rampDuration = barDur > 0.5 ? barDur : 4.0;
 
-        // Outro: after voice ends, music swells to a STRONG level for the
-        // fade-out. musicIntroVol (0.15) is too quiet — the fade from
-        // 0.15→0 is imperceptible. We swell to outroVol (0.45) so the
-        // fade-out has a real signal to work with.
+        // Outro: after voice ends, music swells then gradually fades to silence.
+        // The fade is baked INTO the volume envelope — not relying on afade alone.
+        // This way, amix/loudnorm/encoding can't undo the fade.
         const outroVol = Math.min(Math.max(musicIntroVol * 3.0, 0.35), 0.50);
-        const outroRampStart = voiceTotalDuration.toFixed(3);
-        const outroRampDur = 3.0; // gentle 3s swell — not a sudden jump
-        const outroRampEnd = (voiceTotalDuration + outroRampDur).toFixed(3);
+        const outroSwellEnd = voiceTotalDuration + 3.0; // 3s swell
+        const fadeDecayDur = mixDuration - outroSwellEnd; // remaining time: gradual decay
+        const outroSwellEndStr = outroSwellEnd.toFixed(3);
+        const mixDurStr = mixDuration.toFixed(3);
 
         if (voiceDelaySec > 0.1) {
           const rampStart = Math.max(0, voiceDelaySec - rampDuration).toFixed(3);
@@ -303,37 +303,39 @@ class FFmpegService {
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
           const outV = outroVol.toFixed(4);
-          // Four-phase volume:
-          // Phase 1: 0 → rampStart:  introVol (full music intro)
-          // Phase 2: rampStart → rampEnd: ramp introVol → bedVol
-          // Phase 3: rampEnd → outroRampStart: bedVol (ducked under voice)
-          // Phase 4: outroRampStart → outroRampEnd: swell bedVol → outroVol (LOUD)
-          // Phase 5: outroRampEnd → end: outroVol (strong music for fade-out)
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),if(lt(t,${outroRampStart}),${bedV},if(lt(t,${outroRampEnd}),${bedV}+(${outV}-${bedV})*((t-${outroRampStart})/${outroRampDur}),${outV}))))':eval=frame`;
+          // Six-phase volume envelope with built-in fade-out:
+          // Phase 1: 0 → rampStart:             introVol (full music intro)
+          // Phase 2: rampStart → rampEnd:        introVol → bedVol (duck for voice)
+          // Phase 3: rampEnd → voiceTotalDur:    bedVol (under voice)
+          // Phase 4: voiceTotalDur → swellEnd:   bedVol → outroVol (swell up)
+          // Phase 5: swellEnd → mixDuration:     outroVol → 0 (gradual fade to silence)
+          const voiceEndStr = voiceTotalDuration.toFixed(3);
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),if(lt(t,${voiceEndStr}),${bedV},if(lt(t,${outroSwellEndStr}),${bedV}+(${outV}-${bedV})*((t-${voiceEndStr})/3.0),${outV}*(1.0-((t-${outroSwellEndStr})/${fadeDecayDur.toFixed(3)}))))))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME RAMP (gradual with strong outro) ===', {
-            mode: 'gradual_ramp_with_outro',
-            rampDuration: `${rampDuration.toFixed(2)}s`,
+          logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE (with built-in fade) ===', {
+            mode: 'envelope_with_decay',
             rampStart: `${rampStart}s`,
             rampEnd: `${rampEnd}s`,
-            outroRampStart: `${outroRampStart}s (voice ends, music swells)`,
-            outroRampEnd: `${outroRampEnd}s (music at outroVol)`,
+            voiceEnd: `${voiceEndStr}s`,
+            swellEnd: `${outroSwellEndStr}s (music peaks at ${outV})`,
+            fadeDecay: `${fadeDecayDur.toFixed(1)}s (${outV} → 0)`,
             musicIntro: introV,
             musicBed: bedV,
-            musicOutro: `${outV} (3x intro for audible fade)`,
+            musicOutro: outV,
           });
         } else {
           const bedV = musicBedVol.toFixed(4);
           const outV = outroVol.toFixed(4);
-          // No intro ramp, but still do the outro swell
-          musicVolumeFilter = `volume='if(lt(t,${outroRampStart}),${bedV},if(lt(t,${outroRampEnd}),${bedV}+(${outV}-${bedV})*((t-${outroRampStart})/${outroRampDur}),${outV}))':eval=frame`;
+          const voiceEndStr = voiceTotalDuration.toFixed(3);
+          // No intro ramp — bed → swell → decay
+          musicVolumeFilter = `volume='if(lt(t,${voiceEndStr}),${bedV},if(lt(t,${outroSwellEndStr}),${bedV}+(${outV}-${bedV})*((t-${voiceEndStr})/3.0),${outV}*(1.0-((t-${outroSwellEndStr})/${fadeDecayDur.toFixed(3)}))))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed with strong outro) ===', {
-            mode: 'flat_with_outro',
+          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed → swell → decay) ===', {
+            mode: 'flat_with_decay',
             musicBed: bedV,
-            musicOutro: `${outV} (strong for fade)`,
-            outroRampStart: `${outroRampStart}s`,
-            outroRampEnd: `${outroRampEnd}s`,
+            musicOutro: outV,
+            swellEnd: `${outroSwellEndStr}s`,
+            fadeDecay: `${fadeDecayDur.toFixed(1)}s`,
           });
         }
 
@@ -355,49 +357,41 @@ class FFmpegService {
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
         );
 
-        // Fades:
-        // - Fade-in: tiny anti-click (0.05s).
-        // - Fade-out: smooth fade over the music tail after voice ends.
-        //   Covers the entire tail so music decays to silence by the end.
+        // The PRIMARY fade is baked into the music volume envelope above.
+        // This afade is a SAFETY NET — a gentle complement on the mixed
+        // signal. Even if afade somehow fails, the envelope already
+        // fades music to silence.
         const fadeIn = Math.max(0.02, Math.min(0.15, voiceInput.fadeIn ?? 0.05));
         const actualTail = mixDuration - voiceTotalDuration;
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'tri';
-        // Use 'qsin' (quarter-sine) for fade-out — holds energy in the
-        // middle of the fade and decays gently at the end. Linear ('tri')
-        // sounds abrupt because human hearing is logarithmic: a linear
-        // amplitude drop is perceived as a fast initial volume loss.
-        // 'qsin' compensates for this, giving a smooth perceived decay.
-        const fadeOutCurve = 'qsin';
 
-        // Fade-out starts 3s BEFORE voice ends and extends through the
-        // entire 10s tail. The overlap is masked by the louder voice,
-        // so the listener perceives a seamless ~13s gradual decay.
-        const FADE_OVERLAP = 3.0;
+        // afade starts when voice ends and covers only the tail.
+        // Uses 'qsin' (quarter-sine) for natural perceived decay.
         let fadeOut = 0;
         let fadeOutStart = mixDuration;
         if (actualTail > 0.1) {
-          fadeOutStart = Math.max(0, voiceTotalDuration - FADE_OVERLAP);
-          fadeOut = mixDuration - fadeOutStart; // overlap + tail
+          fadeOutStart = voiceTotalDuration;
+          fadeOut = actualTail;
         }
 
         logger.info('Professional mix settings:', {
           voiceVol,
           musicIntroVol: musicIntroVol.toFixed(3),
           musicBedVol: musicBedVol.toFixed(3),
+          outroVol: outroVol.toFixed(3),
           voiceDelay: `${voiceDelaySec}s`,
           voiceDuration: `${voiceTotalDuration}s`,
           musicDuration: `${musicDuration.toFixed(1)}s`,
           mixDuration: `${mixDuration}s`,
           fadeIn: `${fadeIn}s`,
-          fadeOut: fadeOut > 0 ? `${fadeOut}s (exp)` : 'none (no tail)',
-          fadeOutStart: `${fadeOutStart}s`,
-          actualTail: `${actualTail.toFixed(2)}s`,
-          approach: 'flat-constant (no ramp, no sidechain)',
+          fadeOut: fadeOut > 0 ? `${fadeOut.toFixed(1)}s (qsin, safety net)` : 'none',
+          envelopeFade: `${fadeDecayDur.toFixed(1)}s (baked into volume)`,
+          approach: 'envelope-based fade (music volume → 0)',
         });
 
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;
         if (fadeOut > 0) {
-          const fadeOutFilter = `afade=t=out:st=${fadeOutStart}:d=${fadeOut}:curve=${fadeOutCurve}`;
+          const fadeOutFilter = `afade=t=out:st=${fadeOutStart}:d=${fadeOut}:curve=qsin`;
           filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
         } else {
           // No fade-out — just apply fade-in anti-click
