@@ -357,8 +357,11 @@ class FFmpegService {
         //   Covers the entire tail so music decays to silence by the end.
         const fadeIn = Math.max(0.02, Math.min(0.15, voiceInput.fadeIn ?? 0.05));
         const actualTail = mixDuration - voiceTotalDuration;
-        const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'exp';
-        const fadeOutCurve = 'exp';
+        const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'tri';
+        // Use 'tri' (linear) for fade-out — 'exp' drops to silence within
+        // the first ~1s of the fade, making the rest inaudible silence.
+        // Linear gives a smooth, professional radio-style fade.
+        const fadeOutCurve = 'tri';
 
         // Fade-out spans the full music tail for a clean ending
         let fadeOut = 0;

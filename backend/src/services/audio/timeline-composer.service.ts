@@ -931,30 +931,36 @@ class TimelineComposerService {
         const clampedFadeIn = Math.max(0.02, Math.min(0.12, fadeIn));
         const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
 
+        // Apply loudness normalization BEFORE the fade-out, not after.
+        // loudnorm with tight LRA (3.0) compresses the fade's dynamic range,
+        // fighting the fade-out and creating pumping artifacts.
+        if (normalizeLoudness) {
+          const target = Math.max(-60, Math.min(0, loudnessTargetLUFS));
+          const tp = Math.max(-10, Math.min(0, loudnessTruePeak));
+          filters.push(`[trimmed]loudnorm=I=${target}:TP=${tp}:LRA=11.0[normed]`);
+        } else {
+          filters.push('[trimmed]volume=1.5[normed]');
+        }
+
         if (fadeOut > 0.1) {
           const clampedFadeOut = Math.max(0.1, Math.min(5.0, fadeOut));
           // Ensure fade starts after voice ends, never during voice
           const fadeOutStart = Math.max(lastVoiceEndTime, trimDuration - clampedFadeOut);
-          const fadeOutCurve = clampedFadeOut > 1.0 ? 'exp' : 'tri';
+          // Use 'tri' (linear) — 'exp' drops to near-silence within ~1s,
+          // making the remaining seconds inaudible dead air.
+          const fadeOutCurve = 'tri';
           filters.push(
-            `[trimmed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
+            `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
             `afade=t=out:st=${fadeOutStart}:d=${clampedFadeOut}:curve=${fadeOutCurve}[faded]`
           );
         } else {
           // No fade-out needed — just apply anti-click fade-in
           filters.push(
-            `[trimmed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve}[faded]`
+            `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve}[faded]`
           );
         }
 
-        // Loudness normalization
-        if (normalizeLoudness) {
-          const target = Math.max(-60, Math.min(0, loudnessTargetLUFS));
-          const tp = Math.max(-10, Math.min(0, loudnessTruePeak));
-          filters.push(`[faded]loudnorm=I=${target}:TP=${tp}:LRA=3.0[out]`);
-        } else {
-          filters.push('[faded]volume=1.5[out]');
-        }
+        filters.push('[faded]anull[out]');
 
         const filterStr = filters.join(';');
         command.complexFilter(filterStr, 'out');
