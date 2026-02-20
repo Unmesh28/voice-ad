@@ -515,24 +515,49 @@ class TimelineComposerService {
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
     if (cursor > desiredEnd && lastVoiceEntry) {
-      // Trim trailing music that's too long
+      // Trim trailing music that's too long, but ensure the tail portion
+      // (after voice) is at full volume for a proper outro.
       for (let i = musicVolumeSegments.length - 1; i >= 0; i--) {
         if (musicVolumeSegments[i].startTime >= desiredEnd) {
           musicVolumeSegments.splice(i, 1);
-        } else if (musicVolumeSegments[i].endTime > desiredEnd) {
+        } else if (musicVolumeSegments[i].startTime >= lastVoiceEnd) {
+          // Tail segment — set to full volume and clamp to desiredEnd
+          musicVolumeSegments[i].volume = 0.50;
+          musicVolumeSegments[i].behavior = 'full' as MusicBehavior;
           musicVolumeSegments[i].endTime = desiredEnd;
+        } else if (musicVolumeSegments[i].endTime > lastVoiceEnd) {
+          // Segment straddles voice end — cap at voice end
+          musicVolumeSegments[i].endTime = lastVoiceEnd;
         }
       }
-      logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s`);
+      // Ensure there's a full-volume segment for the tail
+      const hasTailSeg = musicVolumeSegments.some((s) => s.startTime >= lastVoiceEnd);
+      if (!hasTailSeg && lastVoiceEnd < desiredEnd) {
+        musicVolumeSegments.push({
+          startTime: lastVoiceEnd,
+          endTime: desiredEnd,
+          volume: 0.50,
+          behavior: 'full' as MusicBehavior,
+        });
+      }
+      logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s (tail at full volume)`);
       cursor = desiredEnd;
     } else if (cursor < desiredEnd) {
-      // Extend last music volume segment to cover the tail
+      // End the last (ducked) segment at the voice end, then add a NEW
+      // full-volume segment for the outro tail. This makes the music swell
+      // back to full after voice ends — not stay at quiet ducked level.
       const lastMvs = musicVolumeSegments[musicVolumeSegments.length - 1];
       if (lastMvs) {
-        lastMvs.endTime = desiredEnd;
+        lastMvs.endTime = lastVoiceEnd;
       }
+      musicVolumeSegments.push({
+        startTime: lastVoiceEnd,
+        endTime: desiredEnd,
+        volume: 0.50, // Full music volume for outro
+        behavior: 'full' as MusicBehavior,
+      });
       logger.info(
-        `Music tail: voice ends ${lastVoiceEnd.toFixed(1)}s, music continues to ${desiredEnd.toFixed(1)}s (+${MUSIC_TAIL}s fade-out)`
+        `Music tail: voice ends ${lastVoiceEnd.toFixed(1)}s, music swells to full (0.50) and continues to ${desiredEnd.toFixed(1)}s (+${MUSIC_TAIL}s fade-out)`
       );
       cursor = desiredEnd;
     }
