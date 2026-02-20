@@ -6,6 +6,9 @@ import ttsManager from '../tts/tts-manager.service';
 import soundTemplateService from '../music/sound-template.service';
 import masteringPresetsService, { getMasteringConfig, getFormatOptions } from '../audio/mastering-presets.service';
 import ffmpegService from '../audio/ffmpeg.service';
+import { analyzeMusic } from '../audio/music-analyzer.service';
+import { alignVoiceToMusic } from '../audio/music-aligner.service';
+import { calculatePrePostRoll } from '../../utils/musical-timing';
 import type {
   AdForm,
   AdFormBuildResult,
@@ -280,13 +283,28 @@ class AdFormBuilderService {
     // Calculate total speech duration
     const totalSpeechDuration = state.ttsFiles.reduce((sum, f) => sum + f.duration, 0);
 
-    // Ad structure: [brief music intro: 0.5s] → [voice over music] → [music tail]
-    // Short intro so voice starts ASAP — no long gap before speech.
-    const introPadding = production.timelineProperties?.introPadding ?? 0.5;
+    // ── Beat-aligned voice entry ──────────────────────────────────
+    // Instead of a fixed introPadding, calculate the pre-roll from
+    // the music's BPM so the voice enters on a downbeat.
+    const templateDef = typeof production.soundTemplate === 'object'
+      ? production.soundTemplate as AdFormSoundTemplate
+      : null;
+    const musicBPM = templateDef?.bpm ?? 100;          // default 100 BPM
     const soundTail = production.timelineProperties?.soundTail ?? 1.0;
+
+    // Pre/post-roll in bars based on ad length and BPM
+    const prePost = calculatePrePostRoll(totalSpeechDuration, musicBPM, {
+      genre: templateDef?.genre,
+      adDuration: state.adform.metadata?.targetDuration,
+    });
+
+    // Use bar-aligned pre-roll, but allow explicit override
+    const introPadding = production.timelineProperties?.introPadding
+      ?? prePost.preRollDuration;
+
     const targetDuration = state.adform.metadata?.targetDuration
       || production.timelineProperties?.forceLength
-      || (totalSpeechDuration + introPadding + soundTail);
+      || (totalSpeechDuration + introPadding + Math.max(soundTail, prePost.postRollDuration));
 
     // Step 1: Assemble elastic sound template
     const musicOutputPath = path.join(state.workDir, 'music_assembled.mp3');
@@ -383,9 +401,26 @@ class AdFormBuilderService {
 
     const rawMixPath = path.join(state.workDir, 'mix_raw.mp3');
 
-    // Voice enters after the intro music-only padding so the music
-    // can establish before the voiceover starts (standard radio ad technique).
-    const voiceDelay = introPadding;
+    // ── Analyze music and snap voice to a downbeat ────────────────
+    // Analyze the processed music track to build a beat grid, then
+    // align voice entry to the nearest downbeat so the voice enters
+    // exactly on bar 1 (or bar 2) — musically tight.
+    let voiceDelay = introPadding;
+    try {
+      const analysis = await analyzeMusic(processedMusicPath, musicBPM);
+      const alignment = alignVoiceToMusic(analysis, [], {
+        preRollDuration: introPadding,
+        postRollBars: prePost.postRollBars,
+        barDuration: 60 / musicBPM * 4, // 4/4 time
+      });
+      voiceDelay = alignment.voiceDelay;
+      logger.info(`Beat-aligned voice entry: bar ${alignment.voiceEntryBar}, delay ${voiceDelay.toFixed(3)}s (score: ${alignment.alignmentScore.toFixed(2)})`);
+    } catch (err: any) {
+      logger.warn(`Music analysis failed, using bar-estimated delay: ${err.message}`);
+      // Fallback: snap to nearest bar boundary manually
+      const barDuration = 60 / musicBPM * 4;
+      voiceDelay = Math.max(barDuration, Math.round(introPadding / barDuration) * barDuration);
+    }
 
     // If a target duration was specified, enforce it so content never runs over.
     // If voice overflows, the mix will apply a graceful fade-out at the boundary.
@@ -393,13 +428,10 @@ class AdFormBuilderService {
       || production.timelineProperties?.forceLength
       || undefined;
 
-    // Mix voice + music in a single pass. Sidechain ducking is handled inside
-    // mixAudio where the voice delay is applied correctly — the sidechain key
-    // signal is silent during the intro, so music plays at full level during
-    // the intro and only ducks when the voiceover actually starts.
-    // (Previously, a separate pre-ducking step ran applySidechainDucking on
-    // the raw voice file without delay, causing the intro to be wrongly ducked
-    // and double-ducking when mixAudio applied its own sidechain too.)
+    // Mix voice + music. Voice delay is beat-aligned to a downbeat so
+    // the voice enters on a musically natural bar boundary. The mix
+    // function applies a slow volume ramp that overlaps with voice entry.
+    const barDuration = 60 / musicBPM * 4; // 4/4 time
     await ffmpegService.mixAudio({
       voiceInput: { filePath: voiceFilePath, volume: config.voiceVolume, delay: voiceDelay, fadeIn, fadeOut, fadeCurve: fadeCurve as any },
       musicInput: { filePath: processedMusicPath, volume: config.musicVolume },
@@ -410,6 +442,7 @@ class AdFormBuilderService {
       loudnessTargetLUFS: loudness.lufs,
       loudnessTruePeak: loudness.truePeak,
       maxDuration,
+      barDuration,
     });
 
     // Step 8: Apply mastering chain

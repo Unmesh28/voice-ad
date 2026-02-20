@@ -42,6 +42,9 @@ interface MixOptions {
   loudnessTruePeak?: number;
   /** Maximum output duration in seconds. If mix exceeds this, applies graceful fade-out and trim. */
   maxDuration?: number;
+  /** Bar duration in seconds (from BPM). When provided, the music volume
+   *  ramp is timed to exactly 1 bar for a musically natural transition. */
+  barDuration?: number;
 }
 
 class FFmpegService {
@@ -98,6 +101,7 @@ class FFmpegService {
           loudnessTargetLUFS,
           loudnessTruePeak,
           maxDuration,
+          barDuration: options.barDuration,
         });
       }
 
@@ -142,6 +146,7 @@ class FFmpegService {
     loudnessTargetLUFS: number;
     loudnessTruePeak: number;
     maxDuration?: number;
+    barDuration?: number;
   }): Promise<string> {
     const {
       voiceInput,
@@ -224,17 +229,23 @@ class FFmpegService {
           : '';
 
         let musicVolumeFilter: string;
-        const rampDuration = 5.0; // seconds — slow, gradual ease-down
+
+        // When bar duration is known, ramp over exactly 1 bar so the
+        // transition feels musical (starts 1 bar before voice entry,
+        // finishes right as voice comes in on the downbeat).
+        // Fallback: 4 seconds if no bar info.
+        const barDur = opts.barDuration ?? 0;
+        const rampDuration = barDur > 0.5 ? barDur : 4.0;
 
         if (voiceDelaySec > 0.1) {
-          // Start the ramp BEFORE voice enters so they overlap:
-          // music is already easing down as voice fades in on top.
-          const rampLeadIn = Math.min(1.0, voiceDelaySec * 0.5); // start up to 1s early
-          const rampStart = Math.max(0, voiceDelaySec - rampLeadIn).toFixed(3);
-          const rampEnd = (voiceDelaySec - rampLeadIn + rampDuration).toFixed(3);
+          // Start ramp 1 bar (or rampDuration) before voice enters so
+          // music is already at bed level when voice hits the downbeat.
+          // Voice and ramp overlap — they merge naturally.
+          const rampStart = Math.max(0, voiceDelaySec - rampDuration).toFixed(3);
+          const rampEnd = voiceDelaySec.toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          // Slow linear ramp from introVol to bedVol, overlapping with voice entry
+          // Smooth ramp: music eases down over 1 bar, voice enters right at the end
           musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),${bedV}))':eval=frame`;
         } else {
           musicVolumeFilter = `volume=${musicBedVol}`;
