@@ -1,6 +1,7 @@
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 import { logger } from '../../config/logger';
 
 /** Default Suno API base URL. Supports sunoapi.org and kie.ai (same interface). */
@@ -135,6 +136,44 @@ class KieSunoMusicService {
     };
   }
 
+  /**
+   * Make an HTTP request using curl (bypasses Cloudflare TLS fingerprint blocking).
+   * Falls back to axios if curl is unavailable.
+   */
+  private curlPost(url: string, body: Record<string, unknown>): any {
+    const bodyJson = JSON.stringify(body);
+    // Escape single quotes in JSON for shell safety
+    const escaped = bodyJson.replace(/'/g, "'\\''");
+    try {
+      const result = execSync(
+        `curl -s -X POST "${url}" ` +
+        `-H "Authorization: Bearer ${this.apiKey}" ` +
+        `-H "Content-Type: application/json" ` +
+        `-d '${escaped}'`,
+        { timeout: 30000, encoding: 'utf-8' }
+      );
+      return JSON.parse(result);
+    } catch (err: any) {
+      logger.warn(`curl POST failed, falling back to axios: ${err.message}`);
+      return null; // Will trigger axios fallback
+    }
+  }
+
+  private curlGet(url: string): any {
+    try {
+      const result = execSync(
+        `curl -s "${url}" ` +
+        `-H "Authorization: Bearer ${this.apiKey}" ` +
+        `-H "Content-Type: application/json"`,
+        { timeout: 15000, encoding: 'utf-8' }
+      );
+      return JSON.parse(result);
+    } catch (err: any) {
+      logger.warn(`curl GET failed, falling back to axios: ${err.message}`);
+      return null;
+    }
+  }
+
   private async submitGenerate(params: {
     prompt: string;
     customMode: boolean;
@@ -157,13 +196,20 @@ class KieSunoMusicService {
       body.title = title;
     }
 
-    const { data } = await axios.post<KieGenerateResponse>(url, body, {
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    });
+    // Try curl first (bypasses Cloudflare TLS fingerprint blocking)
+    let data: KieGenerateResponse | null = this.curlPost(url, body);
+
+    // Fallback to axios if curl failed
+    if (!data) {
+      const response = await axios.post<KieGenerateResponse>(url, body, {
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      });
+      data = response.data;
+    }
 
     if (data.code !== 200 || !data.data?.taskId) {
       const msg = (data as any).msg || 'Unknown error';
@@ -205,9 +251,14 @@ class KieSunoMusicService {
   }
 
   private async getTaskDetails(taskId: string): Promise<KieRecordInfoResponse> {
-    const url = `${this.baseUrl}/generate/record-info`;
+    const url = `${this.baseUrl}/generate/record-info?taskId=${encodeURIComponent(taskId)}`;
+
+    // Try curl first
+    const curlResult = this.curlGet(url);
+    if (curlResult) return curlResult;
+
+    // Fallback to axios
     const { data } = await axios.get<KieRecordInfoResponse>(url, {
-      params: { taskId },
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
@@ -218,6 +269,17 @@ class KieSunoMusicService {
   }
 
   private async downloadAudio(audioUrl: string): Promise<Buffer> {
+    // Try curl first (audio downloads usually don't have Cloudflare, but just in case)
+    try {
+      const result = execSync(
+        `curl -s -L "${audioUrl}" --output -`,
+        { timeout: 120000, maxBuffer: 100 * 1024 * 1024 }
+      );
+      if (result.length > 0) return result;
+    } catch {
+      // Fallback to axios
+    }
+
     const response = await axios.get(audioUrl, {
       responseType: 'arraybuffer',
       timeout: 60000,
