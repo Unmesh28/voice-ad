@@ -168,9 +168,11 @@ class FFmpegService {
         // A multiplier of 0.15 ≈ -16.5 dB relative to voice at 1.0.
         const musicBedVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
 
-        // Intro level — music plays louder before voice enters so it's clearly
-        // audible. We cap it at 3× bed (~+10 dB) so it never overpowers.
-        const musicIntroVol = Math.min(musicBedVol * 3, 0.45);
+        // Intro level — music plays slightly louder before voice enters.
+        // Keep the contrast gentle (1.8×) so the duck isn't jarring.
+        // A huge gap between intro and bed makes the transition obvious;
+        // a subtle bump keeps the intro audible without a dramatic drop.
+        const musicIntroVol = Math.min(musicBedVol * 1.8, 0.30);
 
         // Voice delay: when blueprint alignment says voice should enter on a
         // downbeat, we pad silence before the voice so it starts at the right
@@ -203,49 +205,50 @@ class FFmpegService {
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
         // ── Voice chain ──────────────────────────────────────────────
-        // normalize → set volume → optional delay → gentle compression
-        // Compression evens out TTS level variations so voice stays
-        // consistently above the music bed.
+        // normalize → set volume → fade-in → delay
+        // The fade-in (0.15s) is applied to the voice audio BEFORE the
+        // delay so that when the voice enters the mix it ramps up from
+        // silence rather than appearing as a hard cut. This lets the
+        // voice "emerge from" the music naturally — a true crossfade.
+        const voiceEntryFade = 0.15; // seconds — smooth voice onset
+        const voiceFade = `afade=t=in:st=0:d=${voiceEntryFade}:curve=tri`;
         const voiceBase = voiceDelaySec > 0
-          ? `[0:a]${normalizeSync},volume=${voiceVol},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
-          : `[0:a]${normalizeSync},volume=${voiceVol}`;
+          ? `[0:a]${normalizeSync},volume=${voiceVol},${voiceFade},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
+          : `[0:a]${normalizeSync},volume=${voiceVol},${voiceFade}`;
 
         const filters: string[] = [
-          // No compression at mix stage — raw voice levels are preserved here.
-          // Compression is applied AFTER mixing, in applyMasteringChain(),
-          // which compresses the combined voice+music together for a cohesive sound.
+          // No compression at mix stage — applied in applyMasteringChain().
           `${voiceBase}[vmix]`,
         ];
 
         // ── Music chain ─────────────────────────────────────────────
-        // Music volume strategy:
-        //  • Before voice entry: play at musicIntroVol (louder, clearly audible)
-        //  • At the EXACT moment voice enters (voiceDelaySec): start a smooth
-        //    ramp DOWN to musicBedVol over 0.5s — synchronized with voice entry
+        // Music volume strategy (crossfade with voice):
+        //  • Before voice entry: play at musicIntroVol (1.8× bed — subtle bump)
+        //  • At voiceDelaySec: voice fades in AND music begins 1.2s ramp down
+        //    simultaneously — true crossfade, no gap between duck and speech
         //  • During voice: hold at musicBedVol (constant bed, no pumping)
-        //  • The ramp is simultaneous with voice, not before it.
         const musicPad = musicDuration < mixDuration
           ? `,apad=whole_dur=${Math.ceil(mixDuration)}`
           : '';
 
-        // Build volume expression for the intro→bed transition
+        // Build volume expression for the intro→bed crossfade.
+        // The music ramp and voice fade-in start at the SAME moment
+        // (voiceDelaySec). As the voice emerges (0→full over 0.15s) the
+        // music is simultaneously easing down (introVol→bedVol over 1.2s).
+        // Because the intro/bed contrast is gentle (1.8×) and the ramp is
+        // long, the listener hears one continuous soundscape — voice
+        // naturally "coming through" the music — not two pieces joined.
         let musicVolumeFilter: string;
-        const rampDuration = 1.0; // gentle 1s ramp for smooth duck
-        // Post-entry duck: voice starts OVER full-volume music, then music
-        // gradually fades underneath. This avoids the "music drops then voice
-        // appears" problem — instead the voice naturally emerges over the
-        // music and the bed settles down around it.
-        const postEntryDelay = 0.2; // seconds AFTER voice entry before duck begins
+        const rampDuration = 1.2; // seconds — very gradual music duck
 
         if (voiceDelaySec > 0.1) {
-          // Music stays at introVol until voice has been speaking for postEntryDelay,
-          // then ramps down to bedVol over rampDuration.
-          const rampStart = (voiceDelaySec + postEntryDelay).toFixed(3);
-          const rampEnd = (voiceDelaySec + postEntryDelay + rampDuration).toFixed(3);
+          // Ramp starts exactly when voice enters — true crossfade
+          const rampStart = voiceDelaySec.toFixed(3);
+          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          // Before rampStart: introVol (music still loud, voice already playing)
-          // rampStart → rampEnd: smooth ramp from introVol to bedVol
+          // Before rampStart: introVol
+          // rampStart → rampEnd: linear ramp (voice fading in simultaneously)
           // After rampEnd: bedVol (constant bed under voice)
           musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*(t-${rampStart})/${rampDuration},${bedV}))':eval=frame`;
         } else {
