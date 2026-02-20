@@ -40,6 +40,8 @@ interface MixOptions {
   loudnessTargetLUFS?: number;
   /** True peak in dB (e.g. -2 for cross-platform). Used in loudnorm TP= (default -2). */
   loudnessTruePeak?: number;
+  /** Maximum output duration in seconds. If mix exceeds this, applies graceful fade-out and trim. */
+  maxDuration?: number;
 }
 
 class FFmpegService {
@@ -59,6 +61,7 @@ class FFmpegService {
       normalizeLoudness = false,
       loudnessTargetLUFS = -24,
       loudnessTruePeak = -2,
+      maxDuration,
     } = options;
 
     try {
@@ -94,6 +97,7 @@ class FFmpegService {
           normalizeLoudness,
           loudnessTargetLUFS,
           loudnessTruePeak,
+          maxDuration,
         });
       }
 
@@ -128,6 +132,7 @@ class FFmpegService {
     normalizeLoudness: boolean;
     loudnessTargetLUFS: number;
     loudnessTruePeak: number;
+    maxDuration?: number;
   }): Promise<string> {
     const {
       voiceInput,
@@ -151,10 +156,11 @@ class FFmpegService {
 
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
-        // When ducking: lower music level so voice stands out; otherwise use optional music volume or default 0.2
-        const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.2;
+        // Music volume: when sidechain ducking is applied separately, use the base volume as-is.
+        // When using amix-only ducking, reduce slightly so voice sits on top.
+        const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.25;
         const musicVolume = audioDucking
-          ? Math.max(0.05, baseMusicVol * (1 - duckingAmount * 0.6))
+          ? Math.max(0.10, baseMusicVol * (1 - duckingAmount * 0.3))
           : baseMusicVol;
 
         // Voice delay: when blueprint alignment says voice should enter on a
@@ -168,7 +174,14 @@ class FFmpegService {
         const musicDuration = await this.getAudioDuration(musicInput.filePath);
         const voiceTotalDuration = voiceDuration + voiceDelaySec;
         // Use whichever is longer: voice track or music track (music often has an outro swell)
-        const mixDuration = Math.max(voiceTotalDuration + 0.5, musicDuration);
+        let mixDuration = Math.max(voiceTotalDuration + 0.5, musicDuration);
+
+        // Enforce maxDuration: if the content overflows the target ad duration,
+        // cap the mix and let the fade-out handle a graceful ending (no hard cut).
+        if (opts.maxDuration && opts.maxDuration > 0 && mixDuration > opts.maxDuration) {
+          logger.warn(`Mix duration ${mixDuration.toFixed(1)}s exceeds target ${opts.maxDuration}s — capping with graceful fade-out`);
+          mixDuration = opts.maxDuration;
+        }
         const SAMPLE_RATE = 44100;
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 

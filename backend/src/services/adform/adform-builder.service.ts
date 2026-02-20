@@ -357,6 +357,12 @@ class AdFormBuilderService {
     // can establish before the voiceover starts (standard radio ad technique).
     const voiceDelay = introPadding;
 
+    // If a target duration was specified, enforce it so content never runs over.
+    // If voice overflows, the mix will apply a graceful fade-out at the boundary.
+    const maxDuration = state.adform.metadata?.targetDuration
+      || production.timelineProperties?.forceLength
+      || undefined;
+
     if (config.sidechainDucking) {
       // Use frequency-aware sidechain ducking
       const duckedMusicPath = path.join(state.workDir, 'music_ducked.mp3');
@@ -374,6 +380,7 @@ class AdFormBuilderService {
         normalizeLoudness: true,
         loudnessTargetLUFS: loudness.lufs,
         loudnessTruePeak: loudness.truePeak,
+        maxDuration,
       });
     } else {
       // Simple volume-based mixing
@@ -386,6 +393,7 @@ class AdFormBuilderService {
         normalizeLoudness: true,
         loudnessTargetLUFS: loudness.lufs,
         loudnessTruePeak: loudness.truePeak,
+        maxDuration,
       });
     }
 
