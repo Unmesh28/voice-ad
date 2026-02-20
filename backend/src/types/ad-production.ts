@@ -517,7 +517,7 @@ export function getOpenAIAdProductionJsonSchema(): {
                   targetBPM: { type: ['number', 'null'] },
                   energyLevel: { type: ['number', 'null'], description: 'Energy 1-10 (1=minimal, 5=established, 7=peak, 10=max). Guides arrangement density.' },
                 },
-                required: ['startSeconds', 'endSeconds', 'label', 'musicPrompt'],
+                required: ['startSeconds', 'endSeconds', 'label', 'musicPrompt', 'targetBPM', 'energyLevel'],
                 additionalProperties: false,
               },
             },
@@ -541,7 +541,7 @@ export function getOpenAIAdProductionJsonSchema(): {
                 timing: { type: ['string', 'null'], description: 'e.g. "0.5s after final word"' },
                 description: { type: ['string', 'null'], description: 'e.g. "Warm major chord, clean release"' },
               },
-              required: ['type'],
+              required: ['type', 'timing', 'description'],
               additionalProperties: false,
             },
             musicalStructure: {
@@ -557,11 +557,11 @@ export function getOpenAIAdProductionJsonSchema(): {
                 keySignature: { type: ['string', 'null'], description: 'Optional key, e.g. "C major", "A minor"' },
                 phraseLength: { type: ['number', 'null'], description: 'Bars per phrase (2-8, usually 4)' },
               },
-              required: ['introType', 'introBars', 'bodyFeel', 'peakMoment', 'endingType', 'outroBars'],
+              required: ['introType', 'introBars', 'bodyFeel', 'peakMoment', 'endingType', 'outroBars', 'keySignature', 'phraseLength'],
               additionalProperties: false,
             },
           },
-          required: ['prompt', 'targetBPM', 'genre', 'mood'],
+          required: ['prompt', 'targetBPM', 'genre', 'mood', 'composerDirection', 'arc', 'instrumentation', 'buttonEnding', 'musicalStructure'],
           additionalProperties: false,
         },
         fades: {
@@ -623,7 +623,7 @@ export function getOpenAIAdProductionJsonSchema(): {
                 description: 'Musical function of this sentence: hook (attention-grab), build (rising energy), peak (climax), resolve (settling), transition (bridging), pause (musical breath)',
               },
             },
-            required: ['index'],
+            required: ['index', 'musicCue', 'musicVolumeMultiplier', 'musicDirection', 'musicalFunction'],
             additionalProperties: false,
           },
         },
@@ -642,13 +642,14 @@ export function getOpenAIAdProductionJsonSchema(): {
           },
         },
       },
-      required: ['script', 'context', 'music', 'fades', 'volume', 'version', 'mixPreset'],
+      required: ['script', 'context', 'music', 'fades', 'volume', 'version', 'mixPreset', 'sentenceCues', 'soundDesign'],
       additionalProperties: false,
     },
   };
 
-  // Inject adFormat schema into the properties
+  // Inject adFormat schema into the properties and required list
   (output.schema as Record<string, any>).properties.adFormat = getAdFormatJsonSchema();
+  (output.schema as Record<string, any>).required.push('adFormat');
 
   return output;
 }
