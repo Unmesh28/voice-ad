@@ -202,8 +202,10 @@ class FFmpegService {
           `[vcomp]asplit=2[vsc][vmix]`,
           // Music: normalize, volume, gentle fade-in for smooth start
           `[1:a]${normalizeSync},volume=${musicVolume},afade=t=in:st=0:d=0.8:curve=tri[mus]`,
-          // Sidechain compress: music auto-ducks when voice is present
-          `[mus][vsc]sidechaincompress=threshold=0.03:ratio=4:attack=15:release=250[mduck]`,
+          // Sidechain compress: music eases down when voice is present.
+          // attack=200ms: slow onset so volume drop is gradual, not abrupt
+          // release=500ms: slow recovery for smooth transitions
+          `[mus][vsc]sidechaincompress=threshold=0.05:ratio=4:attack=200:release=500[mduck]`,
           // Mix compressed voice + ducked music (no auto-normalize, loudnorm handles levels)
           `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
