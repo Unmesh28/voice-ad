@@ -9,6 +9,7 @@ import ScriptGenerator from './pages/ScriptGenerator';
 import Production from './pages/Production';
 import TTSGenerator from './pages/TTSGenerator';
 import MusicGenerator from './pages/MusicGenerator';
+import AdFormBuilder from './pages/AdFormBuilder';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -35,6 +36,7 @@ function App() {
           <Route path="tts-generator" element={<TTSGenerator />} />
           <Route path="music-generator" element={<MusicGenerator />} />
           <Route path="production/:id?" element={<Production />} />
+          <Route path="ad-builder" element={<AdFormBuilder />} />
         </Route>
 
         {/* 404 */}
