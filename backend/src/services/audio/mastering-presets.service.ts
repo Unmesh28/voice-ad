@@ -49,7 +49,7 @@ export function getMasteringConfig(preset: MasteringPreset): MasteringConfig {
   const configs: Record<MasteringPreset, MasteringConfig> = {
     balanced: {
       voiceVolume: 1.0,
-      musicVolume: 0.18,
+      musicVolume: 0.25,
       duckingAmount: 0.30,
       sidechainDucking: true,
       voicePresenceEQ: false,
@@ -60,7 +60,7 @@ export function getMasteringConfig(preset: MasteringPreset): MasteringConfig {
     },
     voiceenhanced: {
       voiceVolume: 1.1,
-      musicVolume: 0.15,
+      musicVolume: 0.20,
       duckingAmount: 0.35,
       sidechainDucking: true,
       voicePresenceEQ: true,
@@ -71,7 +71,7 @@ export function getMasteringConfig(preset: MasteringPreset): MasteringConfig {
     },
     musicenhanced: {
       voiceVolume: 0.95,
-      musicVolume: 0.25,
+      musicVolume: 0.30,
       duckingAmount: 0.18,
       sidechainDucking: true,
       voicePresenceEQ: false,

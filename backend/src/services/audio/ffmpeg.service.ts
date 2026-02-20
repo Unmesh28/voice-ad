@@ -158,7 +158,7 @@ class FFmpegService {
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
         // Music volume: lower base level; sidechain compression handles
         // dynamic ducking when voice is present.
-        const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.22;
+        const baseMusicVol = musicInput.volume !== undefined ? musicInput.volume : 0.25;
         const musicVolume = baseMusicVol;
 
         // Voice delay: when blueprint alignment says voice should enter on a
@@ -200,8 +200,10 @@ class FFmpegService {
           `${voiceBase},acompressor=threshold=-18dB:ratio=3:attack=15:release=200[vcomp]`,
           // Split compressed voice: one for sidechain key, one for mix output
           `[vcomp]asplit=2[vsc][vmix]`,
-          // Music: normalize, volume, gentle fade-in for smooth start
-          `[1:a]${normalizeSync},volume=${musicVolume},afade=t=in:st=0:d=0.8:curve=tri[mus]`,
+          // Music: normalize, volume. No fade-in here — music should start at full level
+          // immediately so the intro padding is audible. The overall mix fade-in (anti-click)
+          // handles any click artifacts at the very start.
+          `[1:a]${normalizeSync},volume=${musicVolume}[mus]`,
           // Sidechain compress: music eases down when voice is present.
           // threshold=0.15 (~-16dBFS): only actual voiced speech triggers ducking, not breaths/noise
           // attack=200ms: slow onset so volume drop is gradual, not abrupt

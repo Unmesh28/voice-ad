@@ -280,9 +280,9 @@ class AdFormBuilderService {
     // Calculate total speech duration
     const totalSpeechDuration = state.ttsFiles.reduce((sum, f) => sum + f.duration, 0);
 
-    // Ad structure: [brief music intro: 0.5s] → [voice over music] → [music tail: 2s]
-    // Short intro so voice enters quickly. Music tail gives a clean ending.
-    const introPadding = production.timelineProperties?.introPadding ?? 0.5;
+    // Ad structure: [music intro: 1.5s] → [voice over music] → [music tail: 2s]
+    // Music intro lets the bed establish before voice enters (standard radio technique).
+    const introPadding = production.timelineProperties?.introPadding ?? 1.5;
     const soundTail = production.timelineProperties?.soundTail ?? 2.0;
     const targetDuration = state.adform.metadata?.targetDuration
       || production.timelineProperties?.forceLength
