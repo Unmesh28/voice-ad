@@ -174,7 +174,7 @@ class FFmpegService {
         // Music tail = time after voice ends where music plays alone and fades out
         const musicTail = Math.max(0, musicDuration - voiceTotalDuration);
         // Mix = voice duration + music tail (so voice always plays fully, music tail fades out)
-        let mixDuration = voiceTotalDuration + Math.min(musicTail, 3.0); // cap music tail at 3s
+        let mixDuration = voiceTotalDuration + Math.min(musicTail, 4.0); // cap music tail at 4s for smooth fade-out
 
         // Enforce maxDuration: trim the music tail to fit, but NEVER cut the voice.
         if (opts.maxDuration && opts.maxDuration > 0) {
@@ -225,7 +225,7 @@ class FFmpegService {
         let fadeOut = 0;
         let fadeOutStart = mixDuration;
         if (actualTail > 0.3) {
-          fadeOut = Math.min(actualTail, voiceInput.fadeOut ?? 2.0);
+          fadeOut = Math.min(actualTail, voiceInput.fadeOut ?? 3.0);
           // Fade starts at the voice end (or later), never before
           fadeOutStart = Math.max(voiceTotalDuration, mixDuration - fadeOut);
         }
