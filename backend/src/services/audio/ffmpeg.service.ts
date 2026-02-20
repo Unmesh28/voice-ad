@@ -212,7 +212,8 @@ class FFmpegService {
 
         // Mix duration: voice plays fully, then music tail for smooth fade-out.
         // The tail gives the music room to decay naturally instead of ending abruptly.
-        const MUSIC_TAIL = 5.0;
+        // 7s gives a long, professional radio-style fade.
+        const MUSIC_TAIL = 7.0;
         let mixDuration = voiceTotalDuration + MUSIC_TAIL;
 
         // Enforce maxDuration: the tail must fit WITHIN the slot.
@@ -288,52 +289,52 @@ class FFmpegService {
         const barDur = opts.barDuration ?? 0;
         const rampDuration = barDur > 0.5 ? barDur : 4.0;
 
-        // Outro ramp: after voice ends, music swells back to full volume
-        // over 1.5s so the tail/fade-out is clearly audible — not stuck at
-        // the quiet bed level. voiceTotalDuration = voiceDuration + delay.
+        // Outro: after voice ends, music swells to a STRONG level for the
+        // fade-out. musicIntroVol (0.15) is too quiet — the fade from
+        // 0.15→0 is imperceptible. We swell to outroVol (0.45) so the
+        // fade-out has a real signal to work with.
+        const outroVol = Math.min(Math.max(musicIntroVol * 3.0, 0.35), 0.50);
         const outroRampStart = voiceTotalDuration.toFixed(3);
-        const outroRampDur = 1.5;
+        const outroRampDur = 2.0;
         const outroRampEnd = (voiceTotalDuration + outroRampDur).toFixed(3);
 
         if (voiceDelaySec > 0.1) {
-          // Start ramp 1 bar (or rampDuration) before voice enters so
-          // music is already at bed level when voice hits the downbeat.
-          // Voice and ramp overlap — they merge naturally.
           const rampStart = Math.max(0, voiceDelaySec - rampDuration).toFixed(3);
           const rampEnd = voiceDelaySec.toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          // Three-phase volume: intro → duck under voice → swell back for outro
-          // Phase 1: 0 → rampStart:  introVol (full music)
+          const outV = outroVol.toFixed(4);
+          // Four-phase volume:
+          // Phase 1: 0 → rampStart:  introVol (full music intro)
           // Phase 2: rampStart → rampEnd: ramp introVol → bedVol
           // Phase 3: rampEnd → outroRampStart: bedVol (ducked under voice)
-          // Phase 4: outroRampStart → outroRampEnd: ramp bedVol → introVol
-          // Phase 5: outroRampEnd → end: introVol (full music for fade-out)
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),if(lt(t,${outroRampStart}),${bedV},if(lt(t,${outroRampEnd}),${bedV}+(${introV}-${bedV})*((t-${outroRampStart})/${outroRampDur}),${introV}))))':eval=frame`;
+          // Phase 4: outroRampStart → outroRampEnd: swell bedVol → outroVol (LOUD)
+          // Phase 5: outroRampEnd → end: outroVol (strong music for fade-out)
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),if(lt(t,${outroRampStart}),${bedV},if(lt(t,${outroRampEnd}),${bedV}+(${outV}-${bedV})*((t-${outroRampStart})/${outroRampDur}),${outV}))))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME RAMP (gradual with outro) ===', {
+          logger.info('=== [STEP 4] MUSIC VOLUME RAMP (gradual with strong outro) ===', {
             mode: 'gradual_ramp_with_outro',
-            barDuration: barDur > 0.5 ? `${barDur.toFixed(2)}s (from BPM)` : 'none (using 4s default)',
             rampDuration: `${rampDuration.toFixed(2)}s`,
-            rampStart: `${rampStart}s (music at introVol before this)`,
-            rampEnd: `${rampEnd}s (music at bedVol after this, voice starts here)`,
-            outroRampStart: `${outroRampStart}s (voice ends, music swells back)`,
-            outroRampEnd: `${outroRampEnd}s (music at introVol for fade-out)`,
-            musicVolBefore: `${introV} (intro volume)`,
-            musicVolDuring: `${bedV} (bed volume under voice)`,
-            musicVolOutro: `${introV} (back to full for outro fade)`,
+            rampStart: `${rampStart}s`,
+            rampEnd: `${rampEnd}s`,
+            outroRampStart: `${outroRampStart}s (voice ends, music swells)`,
+            outroRampEnd: `${outroRampEnd}s (music at outroVol)`,
+            musicIntro: introV,
+            musicBed: bedV,
+            musicOutro: `${outV} (3x intro for audible fade)`,
           });
         } else {
-          const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
+          const outV = outroVol.toFixed(4);
           // No intro ramp, but still do the outro swell
-          musicVolumeFilter = `volume='if(lt(t,${outroRampStart}),${bedV},if(lt(t,${outroRampEnd}),${bedV}+(${introV}-${bedV})*((t-${outroRampStart})/${outroRampDur}),${introV}))':eval=frame`;
+          musicVolumeFilter = `volume='if(lt(t,${outroRampStart}),${bedV},if(lt(t,${outroRampEnd}),${bedV}+(${outV}-${bedV})*((t-${outroRampStart})/${outroRampDur}),${outV}))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed with outro ramp) ===', {
+          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed with strong outro) ===', {
             mode: 'flat_with_outro',
-            musicVolDuring: `${bedV} (bed volume throughout voice)`,
-            outroRampStart: `${outroRampStart}s (voice ends, music swells back)`,
-            outroRampEnd: `${outroRampEnd}s (music at ${introV} for fade-out)`,
+            musicBed: bedV,
+            musicOutro: `${outV} (strong for fade)`,
+            outroRampStart: `${outroRampStart}s`,
+            outroRampEnd: `${outroRampEnd}s`,
           });
         }
 
@@ -367,12 +368,16 @@ class FFmpegService {
         // Linear gives a smooth, professional radio-style fade.
         const fadeOutCurve = 'tri';
 
-        // Fade-out spans the full music tail for a clean ending
+        // Fade-out starts 2s BEFORE voice ends and extends through the
+        // entire tail. This overlap means the fade begins subtly under the
+        // voice (voice is louder so listener doesn't notice) and continues
+        // smoothly after voice ends. Total fade = 2s overlap + tail.
+        const FADE_OVERLAP = 2.0;
         let fadeOut = 0;
         let fadeOutStart = mixDuration;
         if (actualTail > 0.1) {
-          fadeOut = actualTail; // fade covers the entire tail
-          fadeOutStart = voiceTotalDuration; // starts right when voice ends
+          fadeOutStart = Math.max(0, voiceTotalDuration - FADE_OVERLAP);
+          fadeOut = mixDuration - fadeOutStart; // overlap + tail
         }
 
         logger.info('Professional mix settings:', {

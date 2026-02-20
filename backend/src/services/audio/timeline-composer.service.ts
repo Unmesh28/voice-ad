@@ -259,11 +259,13 @@ class TimelineComposerService {
       }
     }
 
-    // 5. Compute fade-out: only fade the music tail after voice ends.
-    //    fadeOutStart must be >= lastVoiceEndTime so voice is never faded.
+    // 5. Compute fade-out: start 2s BEFORE voice ends for a gradual feel.
+    //    The overlap is subtle (voice masks the music fade start), then
+    //    continues smoothly through the entire tail.
+    const FADE_OVERLAP = 2.0;
     const trailingMusic = totalDuration - lastVoiceEndTime;
     const effectiveFadeOut = trailingMusic > 0.3
-      ? Math.min(trailingMusic, fadeOut > 0 ? Math.max(fadeOut, trailingMusic) : trailingMusic)
+      ? trailingMusic + FADE_OVERLAP  // total = overlap + tail
       : 0; // No fade if there's no real tail
 
     // 6. Build and run the FFmpeg filter_complex
@@ -511,7 +513,7 @@ class TimelineComposerService {
     // Keep music at its current volume after voice ends, add 3s tail,
     // and let FFmpeg's afade handle a smooth gradual fade to silence.
     // No volume envelope changes in the tail — just a clean fade.
-    const MUSIC_TAIL = 5.0;
+    const MUSIC_TAIL = 7.0;
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
     if (cursor > desiredEnd && lastVoiceEntry) {
@@ -943,11 +945,12 @@ class TimelineComposerService {
         }
 
         if (fadeOut > 0.1) {
-          const clampedFadeOut = Math.max(0.1, Math.min(5.0, fadeOut));
-          // Ensure fade starts after voice ends, never during voice
-          const fadeOutStart = Math.max(lastVoiceEndTime, trimDuration - clampedFadeOut);
-          // Use 'tri' (linear) — 'exp' drops to near-silence within ~1s,
-          // making the remaining seconds inaudible dead air.
+          // fadeOut includes 2s overlap before voice ends.
+          // Clamp to 10s max (7s tail + 2s overlap + margin).
+          const clampedFadeOut = Math.max(0.1, Math.min(10.0, fadeOut));
+          // Start 2s before voice ends — overlap is masked by louder voice
+          const fadeOutStart = Math.max(0, lastVoiceEndTime - 2.0);
+          // Use 'tri' (linear) — 'exp' drops to near-silence within ~1s
           const fadeOutCurve = 'tri';
           filters.push(
             `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
