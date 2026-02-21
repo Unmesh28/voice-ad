@@ -224,40 +224,12 @@ class TimelineComposerService {
     const envelopedMusicPath = path.join(outputDir, `timeline_music_env_${uuidv4().slice(0, 8)}.mp3`);
     await this.applyMusicVolumeEnvelope(preparedMusicPath, musicVolumeSegments, totalDuration, envelopedMusicPath);
 
-    // 4. Apply sidechain compression: music auto-ducks when voice is present.
-    //    Uses voice → acompressor → sidechain key for sidechaincompress on music.
-    //    The volume envelope handles creative shape (full/building/resolving),
-    //    while sidechain handles dynamic real-time ducking under voice.
-    const voiceEntriesForSC = timeline.filter(
-      (e) => e.type === 'voice' && e.filePath && fs.existsSync(e.filePath)
-    );
-
-    let finalMusicPath = envelopedMusicPath;
-
-    if (voiceEntriesForSC.length > 0) {
-      try {
-        // Create combined voice reference track (all positioned voices merged)
-        const voiceRefPath = path.join(outputDir, `timeline_voice_ref_${uuidv4().slice(0, 8)}.mp3`);
-        await ffmpegService.createVoiceReference(
-          voiceEntriesForSC.map((e) => ({ filePath: e.filePath, startTime: e.startTime, volume: e.volume })),
-          totalDuration,
-          voiceRefPath
-        );
-
-        // Apply sidechain compression to music using voice as key signal
-        const sidechainedPath = path.join(outputDir, `timeline_music_sc_${uuidv4().slice(0, 8)}.mp3`);
-        await this.applySidechainToMusic(voiceRefPath, envelopedMusicPath, sidechainedPath);
-        finalMusicPath = sidechainedPath;
-
-        logger.info('Sidechain compression applied to music track');
-
-        // Cleanup voice reference temp file
-        ffmpegService.cleanupFile(voiceRefPath).catch(() => {});
-      } catch (scErr: any) {
-        logger.warn(`Sidechain compression failed, using envelope-only: ${scErr.message}`);
-        finalMusicPath = envelopedMusicPath;
-      }
-    }
+    // Sidechain compression removed: the static volume envelope already
+    // ducks music to the correct level during voiceover segments.
+    // Sidechain caused audible pumping at every [pause] in the script
+    // (compressor releases during silence → music rises → voice resumes
+    // → compressor re-engages → music dips again).
+    const finalMusicPath = envelopedMusicPath;
 
     // 5. Build and run the FFmpeg filter_complex.
     //    Volume envelope holds music at peak. afade does the smooth fade-out.
@@ -437,26 +409,9 @@ class TimelineComposerService {
           }
 
           case 'duck_transition': {
-            // Gentle duck: music eases down slightly at the boundary.
-            // Only a subtle dip (90% of current volume) — the real ducking
-            // is handled by the volume envelope + sidechain compression.
-            const duckDur = Math.min(transitionDur, 0.5);
-            if (duckDur > 0.05) {
-              // Gentle dip: 90% of current volume (not 50% of minimum!)
-              const duckVol = musicVolForSegment * 0.90;
-
-              // Add a duck region at the end of this segment
-              const duckStart = Math.max(segStart, segEnd - duckDur);
-              musicVolumeSegments[musicVolumeSegments.length - 1].endTime = duckStart;
-              musicVolumeSegments.push({
-                startTime: duckStart,
-                endTime: segEnd,
-                volume: duckVol,
-                behavior: 'ducked',
-              });
-
-              logger.debug(`Transition: duck ${duckDur.toFixed(2)}s at end of "${seg.label}" (${musicVolForSegment.toFixed(2)} → ${duckVol.toFixed(2)})`);
-            }
+            // Let applyVolumeCurve's 0.5s ramp handle the smooth transition
+            // between full → ducked. No extra mini-segments — they create
+            // audible dips at segment boundaries.
             cursor = segEnd;
             break;
           }
@@ -682,15 +637,10 @@ class TimelineComposerService {
 
       // Apply energy multiplier based on behavior:
       //   - full/building/accent: wider range (0.8 - 1.15) for musical dynamics
-      //   - ducked/resolving: very narrow range (0.97 - 1.03) to keep music
-      //     consistent under voice — big swings here sound like "different music"
-      //   - none: skip entirely
-      if (mvs.behavior === 'none') continue;
+      //   - ducked/resolving/none: skip — music must stay rock-steady under voice
+      if (mvs.behavior === 'none' || mvs.behavior === 'ducked' || mvs.behavior === 'resolving') continue;
 
-      const isDuckedBehavior = mvs.behavior === 'ducked' || mvs.behavior === 'resolving';
-      const energyMultiplier = isDuckedBehavior
-        ? 0.97 + normalizedEnergy * 0.06   // 0.97 - 1.03 (barely noticeable)
-        : 0.80 + normalizedEnergy * 0.35;  // 0.80 - 1.15 (musical dynamics)
+      const energyMultiplier = 0.80 + normalizedEnergy * 0.35;  // 0.80 - 1.15
       mvs.volume = mvs.volume * energyMultiplier;
     }
 
