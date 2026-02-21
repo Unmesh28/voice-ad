@@ -1621,15 +1621,17 @@ class FFmpegService {
           labels.push(`[${label}]`);
         }
 
-        // Mix all voice entries together
+        // Mix all voice entries together and pad to totalDuration.
+        // apad=whole_dur ensures the reference covers the full mix
+        // duration — sidechaincompress truncates to the shortest input,
+        // so without padding the music tail would be cut off.
         if (entries.length === 1) {
-          // Single voice — just trim to duration
-          filters.push(`${labels[0]}atrim=0:${totalDuration},asetpts=PTS-STARTPTS[out]`);
+          filters.push(`${labels[0]}apad=whole_dur=${totalDuration},atrim=0:${totalDuration},asetpts=PTS-STARTPTS[out]`);
         } else {
           filters.push(
             `${labels.join('')}amix=inputs=${entries.length}:duration=longest:dropout_transition=2[mixed]`
           );
-          filters.push(`[mixed]atrim=0:${totalDuration},asetpts=PTS-STARTPTS[out]`);
+          filters.push(`[mixed]apad=whole_dur=${totalDuration},atrim=0:${totalDuration},asetpts=PTS-STARTPTS[out]`);
         }
 
         const filterStr = filters.join(';');
