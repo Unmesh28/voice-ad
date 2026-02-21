@@ -599,7 +599,8 @@ export class ProductionOrchestrator {
 
     // ── Post-composition duration enforcement ──────────────────────────
     // If the final composition significantly exceeds the target duration,
-    // apply atempo to compress it.
+    // apply atempo to compress it, then re-apply a fade-out because
+    // atempo squishes the original fade.
     let finalDuration = composerResult.duration;
     if (duration > 0 && finalDuration > duration * 1.15) {
       const ratio = finalDuration / duration;
@@ -613,8 +614,16 @@ export class ProductionOrchestrator {
         await ffmpegService.stretchAudioToDuration(outputPath, adjustedTarget, adjustedPath);
         fs.unlinkSync(outputPath);
         fs.renameSync(adjustedPath, outputPath);
+
+        // Re-apply a smooth fade-out after atempo — the original fade
+        // was squished by the speed-up and may no longer reach silence.
+        const fadedPath = outputPath.replace('.mp3', '_faded.mp3');
+        await ffmpegService.applyFadeOut(outputPath, fadedPath, 3.0);
+        fs.unlinkSync(outputPath);
+        fs.renameSync(fadedPath, outputPath);
+
         finalDuration = await ffmpegService.getAudioDuration(outputPath);
-        logger.info(`[Pipeline ${productionId}] Post-composition adjusted: ${finalDuration.toFixed(1)}s`);
+        logger.info(`[Pipeline ${productionId}] Post-composition adjusted: ${finalDuration.toFixed(1)}s (fade repaired)`);
       } catch (atempoErr: any) {
         logger.warn(`[Pipeline ${productionId}] Post-composition atempo failed: ${atempoErr.message}`);
       }

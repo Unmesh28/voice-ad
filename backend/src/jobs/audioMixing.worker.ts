@@ -425,8 +425,8 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
 
     // ── Post-mix duration enforcement ────────────────────────────────
     // If the final mix significantly exceeds the target duration,
-    // apply atempo to compress it to fit. This catches cases where
-    // the TTS-level adjustment wasn't enough.
+    // apply atempo to compress it, then re-apply fade-out because
+    // atempo squishes the original fade.
     if (maxDuration && maxDuration > 0 && duration > maxDuration * 1.15) {
       const ratio = duration / maxDuration;
       // Only adjust up to 1.25x speed to keep audio natural
@@ -443,8 +443,15 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
         const fsSync = require('fs');
         fsSync.unlinkSync(outputPath);
         fsSync.renameSync(adjustedPath, outputPath);
+
+        // Re-apply smooth fade-out after atempo squished the original
+        const fadedPath = outputPath.replace(/\.(mp3|wav|aac)$/, '_faded.$1');
+        await ffmpegService.applyFadeOut(outputPath, fadedPath, 3.0);
+        fsSync.unlinkSync(outputPath);
+        fsSync.renameSync(fadedPath, outputPath);
+
         duration = await ffmpegService.getAudioDuration(outputPath);
-        logger.info(`Post-mix adjusted: ${duration.toFixed(1)}s (target: ${maxDuration}s)`, { productionId });
+        logger.info(`Post-mix adjusted: ${duration.toFixed(1)}s (target: ${maxDuration}s, fade repaired)`, { productionId });
       } catch (atempoErr: any) {
         logger.warn(`Post-mix atempo failed, keeping original: ${atempoErr.message}`, { productionId });
       }

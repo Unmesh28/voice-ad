@@ -921,35 +921,37 @@ class TimelineComposerService {
           `${mixInputStr}amix=inputs=${totalInputs}:duration=longest:dropout_transition=2:normalize=0[mixraw]`
         );
 
-        // Trim to exact duration
-        filters.push(`[mixraw]atrim=0:${totalDuration.toFixed(3)},asetpts=PTS-STARTPTS[trimmed]`);
+        // Trim with a small pad — the fade reaches zero BEFORE the trim
+        // point, so the final samples are always silence.
+        const FADE_PAD = 0.15; // silence after fade ends
+        const trimDuration = totalDuration + FADE_PAD;
+        filters.push(`[mixraw]atrim=0:${trimDuration.toFixed(3)},asetpts=PTS-STARTPTS[trimmed]`);
 
         // NO loudnorm. Single-pass loudnorm dynamically boosts the quiet
         // tail, undoing the fade. Tracks are already pre-normalized.
         filters.push('[trimmed]anull[normed]');
 
         // Fade-out strategy:
-        //   The volume envelope holds music FLAT at peak during the tail.
-        //   A SINGLE afade handles the entire smooth fade-out, starting
-        //   after the swell peak. No double-fade, no discrete steps —
-        //   just one continuous FFmpeg fade curve.
+        //   Volume envelope holds music FLAT at peak during the tail.
+        //   A SINGLE afade handles the smooth fade-out starting after
+        //   the swell peak. No double-fade, no discrete steps.
         //
-        //   'exp' curve = exponential decay. Perceived as very natural:
-        //   slow initial drop, then accelerating — matches how audio
-        //   engineers fade music in radio/TV.
+        //   'qsin' (quarter-sine) is guaranteed to reach EXACTLY zero
+        //   at the end — no residual signal, no click at the trim point.
+        //   Perceived as natural: gentle initial decay, accelerating.
         const clampedFadeIn = Math.max(0.02, Math.min(0.12, fadeIn));
         const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
         const fadeDuration = totalDuration - swellEndTime;
         if (fadeDuration > 0.5) {
           filters.push(
             `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
-            `afade=t=out:st=${swellEndTime.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=exp[out]`
+            `afade=t=out:st=${swellEndTime.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin[out]`
           );
           logger.info('Music fade-out:', {
             fadeStart: `${swellEndTime.toFixed(1)}s (after swell peak)`,
             fadeDuration: `${fadeDuration.toFixed(1)}s`,
-            curve: 'exp',
-            totalDuration: `${totalDuration.toFixed(1)}s`,
+            curve: 'qsin',
+            trimDuration: `${trimDuration.toFixed(1)}s (includes ${FADE_PAD}s silence pad)`,
           });
         } else {
           // No room for fade — just anti-click fade-in
