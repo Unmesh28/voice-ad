@@ -153,7 +153,7 @@ class TimelineComposerService {
     }
 
     // 1. Compute the timeline (also trims trailing music-only segments)
-    const { timeline, musicVolumeSegments, totalDuration, lastVoiceEndTime } = this.computeTimeline(
+    const { timeline, musicVolumeSegments, totalDuration, lastVoiceEndTime, swellEndTime } = this.computeTimeline(
       segments,
       voiceResults,
       sfxResults,
@@ -260,14 +260,13 @@ class TimelineComposerService {
     }
 
     // 5. Build and run the FFmpeg filter_complex.
-    //    The volume envelope already handles the full musical fade-out
-    //    (swell → 10-step quadratic decay to 0). buildAndRunMix only adds
-    //    a short 1.5s safety fade at the very end for clean zero-crossing.
+    //    Volume envelope holds music at peak. afade does the smooth fade-out.
     await this.buildAndRunMix({
       timeline,
       envelopedMusicPath: finalMusicPath,
       totalDuration,
       lastVoiceEndTime,
+      swellEndTime,
       outputPath,
       fadeIn,
       fadeCurve,
@@ -318,6 +317,7 @@ class TimelineComposerService {
     musicVolumeSegments: MusicVolumeSegment[];
     totalDuration: number;
     lastVoiceEndTime: number;
+    swellEndTime: number;
   } {
     const timeline: TimelineEntry[] = [];
     const musicVolumeSegments: MusicVolumeSegment[] = [];
@@ -507,45 +507,34 @@ class TimelineComposerService {
     // alone. afade can be fought by loudnorm/amix, but the volume
     // envelope directly controls the music signal amplitude.
     //
-    // Shape: voice ends → 3s swell to 0.50 → 7s gradual decay to 0
+    // Shape: voice ends → 3s swell to 0.50 → FLAT at peak → afade handles decay
+    // The volume envelope does NOT decay. It holds the music at peak volume.
+    // The actual fade-out is done by FFmpeg's afade in buildAndRunMix,
+    // which produces a perfectly smooth continuous fade (no staircase steps).
     const MUSIC_TAIL = 10.0;
     const SWELL_DUR = 3.0;
     const PEAK_VOL = 0.50;
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
-    // Helper: create swell + fine-grained decay segments for the tail.
-    // Uses 10 steps with quadratic decay for a very smooth fade.
-    // applyVolumeCurve adds 0.5s linear ramps at each boundary, so
-    // the combination of many small steps + ramps ≈ continuous curve.
+    // Helper: create swell segment for the tail.
+    // Music rises to PEAK_VOL then stays flat. afade handles the decay.
     const createTailSegments = (start: number, end: number) => {
       const swellEnd = start + SWELL_DUR;
-      const decayDur = end - swellEnd;
-      // Swell phase: bed → peak
+      // Swell phase: bed volume → peak volume
       musicVolumeSegments.push({
         startTime: start,
         endTime: Math.min(swellEnd, end),
         volume: PEAK_VOL,
         behavior: 'full' as MusicBehavior,
       });
-      // Decay phase: 10 fine-grained steps with quadratic curve
-      // Quadratic: vol = peak * (1 - progress)^2
-      //   → holds volume in first half, accelerates decay in second half
-      //   → matches human hearing (logarithmic perception)
-      if (decayDur > 0.5) {
-        const steps = 10;
-        const stepDur = decayDur / steps;
-        for (let i = 0; i < steps; i++) {
-          const stepStart = swellEnd + i * stepDur;
-          const stepEnd = swellEnd + (i + 1) * stepDur;
-          const progress = (i + 0.5) / steps;
-          const vol = PEAK_VOL * Math.pow(1 - progress, 2);
-          musicVolumeSegments.push({
-            startTime: stepStart,
-            endTime: stepEnd,
-            volume: Math.max(0.005, vol),
-            behavior: 'full' as MusicBehavior,
-          });
-        }
+      // Hold at peak for the rest — afade in buildAndRunMix fades this out
+      if (swellEnd < end) {
+        musicVolumeSegments.push({
+          startTime: swellEnd,
+          endTime: end,
+          volume: PEAK_VOL,
+          behavior: 'full' as MusicBehavior,
+        });
       }
     };
 
@@ -559,7 +548,7 @@ class TimelineComposerService {
         }
       }
       createTailSegments(lastVoiceEnd, desiredEnd);
-      logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s (swell + decay envelope)`);
+      logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s (swell + flat, afade handles decay)`);
       cursor = desiredEnd;
     } else if (cursor < desiredEnd) {
       // End the last segment at voice end, add swell + decay
@@ -569,12 +558,13 @@ class TimelineComposerService {
       }
       createTailSegments(lastVoiceEnd, desiredEnd);
       logger.info(
-        `Music tail: voice ends ${lastVoiceEnd.toFixed(1)}s, swell to ${PEAK_VOL} then decay to 0 over ${MUSIC_TAIL}s`
+        `Music tail: voice ends ${lastVoiceEnd.toFixed(1)}s, swell to ${PEAK_VOL} (flat), afade decays over ${MUSIC_TAIL}s`
       );
       cursor = desiredEnd;
     }
 
-    return { timeline, musicVolumeSegments, totalDuration: cursor, lastVoiceEndTime: lastVoiceEnd };
+    const swellEndTime = lastVoiceEnd + SWELL_DUR;
+    return { timeline, musicVolumeSegments, totalDuration: cursor, lastVoiceEndTime: lastVoiceEnd, swellEndTime };
   }
 
   /**
@@ -858,6 +848,7 @@ class TimelineComposerService {
     envelopedMusicPath: string;
     totalDuration: number;
     lastVoiceEndTime: number;
+    swellEndTime: number;
     outputPath: string;
     fadeIn: number;
     fadeCurve: string;
@@ -870,6 +861,7 @@ class TimelineComposerService {
       envelopedMusicPath,
       totalDuration,
       lastVoiceEndTime,
+      swellEndTime,
       outputPath,
       fadeIn,
       fadeCurve,
@@ -929,36 +921,42 @@ class TimelineComposerService {
           `${mixInputStr}amix=inputs=${totalInputs}:duration=longest:dropout_transition=2:normalize=0[mixraw]`
         );
 
-        // Trim: add padding so the tail fade has room before the cut.
-        const END_PADDING = 0.5;
-        const trimDuration = totalDuration + END_PADDING;
-        filters.push(`[mixraw]atrim=0:${trimDuration},asetpts=PTS-STARTPTS[trimmed]`);
+        // Trim to exact duration
+        filters.push(`[mixraw]atrim=0:${totalDuration.toFixed(3)},asetpts=PTS-STARTPTS[trimmed]`);
 
         // NO loudnorm. Single-pass loudnorm dynamically boosts the quiet
-        // tail (where our volume envelope decays to 0), undoing the fade.
-        // Voice & music are already pre-normalized before mixing.
+        // tail, undoing the fade. Tracks are already pre-normalized.
         filters.push('[trimmed]anull[normed]');
 
-        // Fades:
-        //   Fade-in:  tiny anti-click at the start (0.02–0.12s)
-        //   Fade-out: SHORT safety-net at the VERY END only (last 1.5s)
+        // Fade-out strategy:
+        //   The volume envelope holds music FLAT at peak during the tail.
+        //   A SINGLE afade handles the entire smooth fade-out, starting
+        //   after the swell peak. No double-fade, no discrete steps —
+        //   just one continuous FFmpeg fade curve.
         //
-        // The REAL fade-out is baked into the music volume envelope
-        // (10-step quadratic decay over ~7s). We must NOT also apply a
-        // full-tail afade because envelope * afade = double-fade, making
-        // the music drop to silence way too early then leaving dead air
-        // before the trim cut — that's what makes it sound "abrupt".
-        //
-        // This short afade just guarantees the signal is exactly zero
-        // when atrim cuts, preventing any end-of-file click.
+        //   'exp' curve = exponential decay. Perceived as very natural:
+        //   slow initial drop, then accelerating — matches how audio
+        //   engineers fade music in radio/TV.
         const clampedFadeIn = Math.max(0.02, Math.min(0.12, fadeIn));
         const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
-        const SAFETY_FADE = 1.5; // seconds — just enough to reach zero smoothly
-        const safetyFadeStart = Math.max(0, trimDuration - SAFETY_FADE);
-        filters.push(
-          `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
-          `afade=t=out:st=${safetyFadeStart.toFixed(3)}:d=${SAFETY_FADE}:curve=tri[out]`
-        );
+        const fadeDuration = totalDuration - swellEndTime;
+        if (fadeDuration > 0.5) {
+          filters.push(
+            `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
+            `afade=t=out:st=${swellEndTime.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=exp[out]`
+          );
+          logger.info('Music fade-out:', {
+            fadeStart: `${swellEndTime.toFixed(1)}s (after swell peak)`,
+            fadeDuration: `${fadeDuration.toFixed(1)}s`,
+            curve: 'exp',
+            totalDuration: `${totalDuration.toFixed(1)}s`,
+          });
+        } else {
+          // No room for fade — just anti-click fade-in
+          filters.push(
+            `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve}[out]`
+          );
+        }
 
         const filterStr = filters.join(';');
         command.complexFilter(filterStr, 'out');
