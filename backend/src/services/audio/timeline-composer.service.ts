@@ -259,13 +259,10 @@ class TimelineComposerService {
       }
     }
 
-    // 5. Compute fade-out: the primary fade is baked into the volume
-    //    envelope above (swell → decay to 0). afade is a safety net
-    //    covering just the tail portion.
-    const trailingMusic = totalDuration - lastVoiceEndTime;
-    const effectiveFadeOut = trailingMusic > 0.3 ? trailingMusic : 0;
-
-    // 6. Build and run the FFmpeg filter_complex
+    // 5. Build and run the FFmpeg filter_complex.
+    //    The volume envelope already handles the full musical fade-out
+    //    (swell → 10-step quadratic decay to 0). buildAndRunMix only adds
+    //    a short 1.5s safety fade at the very end for clean zero-crossing.
     await this.buildAndRunMix({
       timeline,
       envelopedMusicPath: finalMusicPath,
@@ -273,7 +270,6 @@ class TimelineComposerService {
       lastVoiceEndTime,
       outputPath,
       fadeIn,
-      fadeOut: effectiveFadeOut,
       fadeCurve,
       normalizeLoudness,
       loudnessTargetLUFS,
@@ -864,7 +860,6 @@ class TimelineComposerService {
     lastVoiceEndTime: number;
     outputPath: string;
     fadeIn: number;
-    fadeOut: number;
     fadeCurve: string;
     normalizeLoudness: boolean;
     loudnessTargetLUFS: number;
@@ -877,7 +872,6 @@ class TimelineComposerService {
       lastVoiceEndTime,
       outputPath,
       fadeIn,
-      fadeOut,
       fadeCurve,
       normalizeLoudness,
       loudnessTargetLUFS,
@@ -935,45 +929,36 @@ class TimelineComposerService {
           `${mixInputStr}amix=inputs=${totalInputs}:duration=longest:dropout_transition=2:normalize=0[mixraw]`
         );
 
-        // Trim to exact duration
-        const END_PADDING = 0.08;
+        // Trim: add padding so the tail fade has room before the cut.
+        const END_PADDING = 0.5;
         const trimDuration = totalDuration + END_PADDING;
         filters.push(`[mixraw]atrim=0:${trimDuration},asetpts=PTS-STARTPTS[trimmed]`);
 
-        // Apply fades
-        // Fade-in: tiny anti-click
-        // Fade-out: ONLY applied to the music tail after voice ends.
-        //   fadeOutStart is guaranteed >= lastVoiceEndTime so voice is never faded.
-        const clampedFadeIn = Math.max(0.02, Math.min(0.12, fadeIn));
-        const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
-
-        // NO loudnorm here. Single-pass loudnorm dynamically adjusts gain
-        // and BOOSTS the quiet tail (where our volume envelope decays to 0),
-        // undoing the fade-out. Same reason mastering chain excludes it:
-        // "loudnorm can revert to dynamic mode, causing level jumps".
-        // Voice & music are already pre-normalized before mixing, so
-        // integrated loudness is already reasonable.
+        // NO loudnorm. Single-pass loudnorm dynamically boosts the quiet
+        // tail (where our volume envelope decays to 0), undoing the fade.
+        // Voice & music are already pre-normalized before mixing.
         filters.push('[trimmed]anull[normed]');
 
-        if (fadeOut > 0.1) {
-          // Primary fade is in the volume envelope. afade is a safety net.
-          const clampedFadeOut = Math.max(0.1, Math.min(12.0, fadeOut));
-          // Start when voice ends — envelope already handles the decay
-          const fadeOutStart = lastVoiceEndTime;
-          // 'qsin' (quarter-sine) — smooth perceived decay
-          const fadeOutCurve = 'qsin';
-          filters.push(
-            `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
-            `afade=t=out:st=${fadeOutStart}:d=${clampedFadeOut}:curve=${fadeOutCurve}[faded]`
-          );
-        } else {
-          // No fade-out needed — just apply anti-click fade-in
-          filters.push(
-            `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve}[faded]`
-          );
-        }
-
-        filters.push('[faded]anull[out]');
+        // Fades:
+        //   Fade-in:  tiny anti-click at the start (0.02–0.12s)
+        //   Fade-out: SHORT safety-net at the VERY END only (last 1.5s)
+        //
+        // The REAL fade-out is baked into the music volume envelope
+        // (10-step quadratic decay over ~7s). We must NOT also apply a
+        // full-tail afade because envelope * afade = double-fade, making
+        // the music drop to silence way too early then leaving dead air
+        // before the trim cut — that's what makes it sound "abrupt".
+        //
+        // This short afade just guarantees the signal is exactly zero
+        // when atrim cuts, preventing any end-of-file click.
+        const clampedFadeIn = Math.max(0.02, Math.min(0.12, fadeIn));
+        const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
+        const SAFETY_FADE = 1.5; // seconds — just enough to reach zero smoothly
+        const safetyFadeStart = Math.max(0, trimDuration - SAFETY_FADE);
+        filters.push(
+          `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
+          `afade=t=out:st=${safetyFadeStart.toFixed(3)}:d=${SAFETY_FADE}:curve=tri[out]`
+        );
 
         const filterStr = filters.join(';');
         command.complexFilter(filterStr, 'out');

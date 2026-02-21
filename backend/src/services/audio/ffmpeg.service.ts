@@ -357,22 +357,18 @@ class FFmpegService {
           `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
         );
 
-        // The PRIMARY fade is baked into the music volume envelope above.
-        // This afade is a SAFETY NET — a gentle complement on the mixed
-        // signal. Even if afade somehow fails, the envelope already
-        // fades music to silence.
+        // The REAL fade-out is baked into the volume envelope above
+        // (Phase 5: outroVol → 0 over fadeDecayDur). We must NOT also
+        // apply a full-tail afade — that creates a double-fade
+        // (envelope * afade) which kills the music too fast then leaves
+        // dead air before the trim cut.
+        //
+        // Instead: tiny anti-click fade-in + short safety fade at the
+        // very end to guarantee zero-crossing at the trim point.
         const fadeIn = Math.max(0.02, Math.min(0.15, voiceInput.fadeIn ?? 0.05));
-        const actualTail = mixDuration - voiceTotalDuration;
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'tri';
-
-        // afade starts when voice ends and covers only the tail.
-        // Uses 'qsin' (quarter-sine) for natural perceived decay.
-        let fadeOut = 0;
-        let fadeOutStart = mixDuration;
-        if (actualTail > 0.1) {
-          fadeOutStart = voiceTotalDuration;
-          fadeOut = actualTail;
-        }
+        const SAFETY_FADE = 1.5;
+        const safetyFadeStart = Math.max(0, mixDuration - SAFETY_FADE);
 
         logger.info('Professional mix settings:', {
           voiceVol,
@@ -384,26 +380,16 @@ class FFmpegService {
           musicDuration: `${musicDuration.toFixed(1)}s`,
           mixDuration: `${mixDuration}s`,
           fadeIn: `${fadeIn}s`,
-          fadeOut: fadeOut > 0 ? `${fadeOut.toFixed(1)}s (qsin, safety net)` : 'none',
+          safetyFade: `${SAFETY_FADE}s at ${safetyFadeStart.toFixed(1)}s (zero-crossing)`,
           envelopeFade: `${fadeDecayDur.toFixed(1)}s (baked into volume)`,
           approach: 'envelope-based fade (music volume → 0)',
         });
 
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;
-        if (fadeOut > 0) {
-          const fadeOutFilter = `afade=t=out:st=${fadeOutStart}:d=${fadeOut}:curve=qsin`;
-          filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
-        } else {
-          // No fade-out — just apply fade-in anti-click
-          filters.push(`[mixed]${fadeInFilter}[faded]`);
-        }
+        const fadeOutFilter = `afade=t=out:st=${safetyFadeStart.toFixed(3)}:d=${SAFETY_FADE}:curve=tri`;
+        filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
 
-        // Skip loudnorm at mix stage — it dynamically adjusts levels and
-        // causes the music to sound loud in the intro then drop when voice
-        // enters (loudnorm boosts the quiet intro, then pulls down when the
-        // louder voice+music signal hits). The mastering chain applies
-        // loudnorm on the final output where it works correctly on the
-        // complete signal.
+        // No loudnorm — inputs are pre-normalized, loudnorm fights the fade.
         filters.push('[faded]anull[out]');
 
         const filterStr = filters.join(';');
