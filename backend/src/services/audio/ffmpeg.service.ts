@@ -348,14 +348,17 @@ class FFmpegService {
           `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
         );
 
+        // Trim with pad — fade reaches zero before the trim point
+        const FADE_PAD = 0.15;
+        const trimDuration = mixDuration + FADE_PAD;
         filters.push(
-          `[mixraw]atrim=0:${mixDuration},asetpts=PTS-STARTPTS[mixed]`,
+          `[mixraw]atrim=0:${trimDuration.toFixed(3)},asetpts=PTS-STARTPTS[mixed]`,
         );
 
         // Volume envelope holds music FLAT at peak after the swell.
         // A single afade handles the smooth fade-out starting from
-        // swell peak — 'exp' curve for natural perceived decay.
-        // No double-fade: envelope = levels, afade = fade.
+        // swell peak — 'qsin' curve: guaranteed to reach exactly zero,
+        // natural perceived decay, no click at trim point.
         const fadeIn = Math.max(0.02, Math.min(0.15, voiceInput.fadeIn ?? 0.05));
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'tri';
         const fadeDuration = mixDuration - outroSwellEnd;
@@ -370,13 +373,13 @@ class FFmpegService {
           musicDuration: `${musicDuration.toFixed(1)}s`,
           mixDuration: `${mixDuration}s`,
           fadeIn: `${fadeIn}s`,
-          fadeOut: `${fadeDuration.toFixed(1)}s (exp, from ${outroSwellEndStr}s)`,
-          approach: 'flat envelope + single afade (no double-fade)',
+          fadeOut: `${fadeDuration.toFixed(1)}s (qsin, from ${outroSwellEndStr}s)`,
+          approach: 'flat envelope + single qsin afade',
         });
 
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;
         if (fadeDuration > 0.5) {
-          const fadeOutFilter = `afade=t=out:st=${outroSwellEndStr}:d=${fadeDuration.toFixed(3)}:curve=exp`;
+          const fadeOutFilter = `afade=t=out:st=${outroSwellEndStr}:d=${fadeDuration.toFixed(3)}:curve=qsin`;
           filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
         } else {
           filters.push(`[mixed]${fadeInFilter}[faded]`);
@@ -621,6 +624,41 @@ class FFmpegService {
             reject(new Error(`Failed to stretch audio: ${msg}`));
           });
 
+        command.run();
+      } catch (error: any) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Apply a fade-out to the last N seconds of an audio file.
+   * Used to repair the ending after post-composition atempo squishes
+   * the original fade, and to guarantee a smooth ending in all cases.
+   */
+  async applyFadeOut(
+    inputPath: string,
+    outputPath: string,
+    fadeDuration: number = 3.0,
+  ): Promise<string> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const dur = await this.getAudioDuration(inputPath);
+        if (dur <= 0) {
+          reject(new Error('Invalid duration for fade-out'));
+          return;
+        }
+        const fadeStart = Math.max(0, dur - fadeDuration);
+        const command = ffmpeg(inputPath)
+          .audioFilters([`afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin`]);
+        this.setOutputOptions(command, 'mp3');
+        command.output(outputPath);
+        command
+          .on('end', () => resolve(outputPath))
+          .on('error', (err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            reject(new Error(`Failed to apply fade-out: ${msg}`));
+          });
         command.run();
       } catch (error: any) {
         reject(error);
