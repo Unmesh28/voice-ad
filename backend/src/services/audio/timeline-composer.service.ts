@@ -511,8 +511,8 @@ class TimelineComposerService {
     // The volume envelope does NOT decay. It holds the music at peak volume.
     // The actual fade-out is done by FFmpeg's afade in buildAndRunMix,
     // which produces a perfectly smooth continuous fade (no staircase steps).
-    const MUSIC_TAIL = 10.0;
-    const SWELL_DUR = 3.0;
+    const MUSIC_TAIL = 2.5;
+    const SWELL_DUR = 1.0;
     const PEAK_VOL = 0.50;
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
