@@ -551,10 +551,16 @@ class TimelineComposerService {
       logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s (swell + flat, afade handles decay)`);
       cursor = desiredEnd;
     } else if (cursor < desiredEnd) {
-      // End the last segment at voice end, add swell + decay
-      const lastMvs = musicVolumeSegments[musicVolumeSegments.length - 1];
-      if (lastMvs) {
-        lastMvs.endTime = lastVoiceEnd;
+      // Remove/trim segments past voice end, then add tail.
+      // Without this cleanup, segments from post-voice music_solo
+      // segments (e.g. "button ending") would overlap the tail and
+      // create invalid segments where endTime < startTime.
+      for (let i = musicVolumeSegments.length - 1; i >= 0; i--) {
+        if (musicVolumeSegments[i].startTime >= lastVoiceEnd) {
+          musicVolumeSegments.splice(i, 1);
+        } else if (musicVolumeSegments[i].endTime > lastVoiceEnd) {
+          musicVolumeSegments[i].endTime = lastVoiceEnd;
+        }
       }
       createTailSegments(lastVoiceEnd, desiredEnd);
       logger.info(
