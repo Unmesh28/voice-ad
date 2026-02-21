@@ -502,40 +502,32 @@ class TimelineComposerService {
       cursor = lastVoiceEnd;
     }
 
-    // ── Music tail: swell up then gradually fade to silence ─────────
+    // ── Music tail: hold ducked volume then fade to silence ─────────
     // The fade is baked INTO the volume segments — not relying on afade
     // alone. afade can be fought by loudnorm/amix, but the volume
     // envelope directly controls the music signal amplitude.
     //
-    // Shape: voice ends → 3s swell to 0.50 → FLAT at peak → afade handles decay
+    // Shape: voice ends → hold at ducked level → afade handles decay
     // The volume envelope does NOT decay. It holds the music at peak volume.
     // The actual fade-out is done by FFmpeg's afade in buildAndRunMix,
     // which produces a perfectly smooth continuous fade (no staircase steps).
     const MUSIC_TAIL = 2.5;
-    const SWELL_DUR = 1.0;
-    const PEAK_VOL = 0.50;
     const desiredEnd = lastVoiceEnd + MUSIC_TAIL;
 
-    // Helper: create swell segment for the tail.
-    // Music rises to PEAK_VOL then stays flat. afade handles the decay.
+    // Helper: create a single tail segment that holds the same volume
+    // the music was at during the voiceover (no swell). afade in
+    // buildAndRunMix handles the smooth fade-out from that level.
     const createTailSegments = (start: number, end: number) => {
-      const swellEnd = start + SWELL_DUR;
-      // Swell phase: bed volume → peak volume
+      // Grab the volume from the last segment (the ducked voiceover level)
+      const lastVol = musicVolumeSegments.length > 0
+        ? musicVolumeSegments[musicVolumeSegments.length - 1].volume
+        : baseMusicVolume;
       musicVolumeSegments.push({
         startTime: start,
-        endTime: Math.min(swellEnd, end),
-        volume: PEAK_VOL,
-        behavior: 'full' as MusicBehavior,
+        endTime: end,
+        volume: lastVol,
+        behavior: 'ducked' as MusicBehavior,
       });
-      // Hold at peak for the rest — afade in buildAndRunMix fades this out
-      if (swellEnd < end) {
-        musicVolumeSegments.push({
-          startTime: swellEnd,
-          endTime: end,
-          volume: PEAK_VOL,
-          behavior: 'full' as MusicBehavior,
-        });
-      }
     };
 
     if (cursor > desiredEnd && lastVoiceEntry) {
@@ -548,7 +540,7 @@ class TimelineComposerService {
         }
       }
       createTailSegments(lastVoiceEnd, desiredEnd);
-      logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s (swell + flat, afade handles decay)`);
+      logger.info(`Trimmed trailing music: ${cursor.toFixed(1)}s → ${desiredEnd.toFixed(1)}s (hold + fade)`);
       cursor = desiredEnd;
     } else if (cursor < desiredEnd) {
       // Remove/trim segments past voice end, then add tail.
@@ -564,12 +556,13 @@ class TimelineComposerService {
       }
       createTailSegments(lastVoiceEnd, desiredEnd);
       logger.info(
-        `Music tail: voice ends ${lastVoiceEnd.toFixed(1)}s, swell to ${PEAK_VOL} (flat), afade decays over ${MUSIC_TAIL}s`
+        `Music tail: voice ends ${lastVoiceEnd.toFixed(1)}s, hold + fade over ${MUSIC_TAIL}s`
       );
       cursor = desiredEnd;
     }
 
-    const swellEndTime = lastVoiceEnd + SWELL_DUR;
+    // Fade starts immediately at voice end (no swell)
+    const swellEndTime = lastVoiceEnd;
     return { timeline, musicVolumeSegments, totalDuration: cursor, lastVoiceEndTime: lastVoiceEnd, swellEndTime };
   }
 
