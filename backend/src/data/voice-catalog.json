@@ -1,0 +1,58 @@
+{
+  "metadata": {
+    "description": "Cloned voice catalog for ad production. Maps voice IDs to ad categories.",
+    "updated_at": "2026-02-23",
+    "default_voice_id": "5AzbEJa3gFESPwi37koY"
+  },
+  "voices": [
+    {
+      "voice_id": "5AzbEJa3gFESPwi37koY",
+      "label": "Ads",
+      "gender": "male",
+      "categories": ["ads", "general", "retail", "ecommerce", "fmcg", "food", "consumer", "product_launch", "sale", "offer", "brand"],
+      "keywords": ["advertisement", "commercial", "product", "brand", "shop", "buy", "offer", "discount", "sale", "launch", "retail", "store", "consumer"]
+    },
+    {
+      "voice_id": "55CTDqnBkNEZUeoU3tlZ",
+      "label": "Banking",
+      "gender": "male",
+      "categories": ["banking", "finance", "insurance", "investment", "loan", "credit", "mutual_fund", "wealth", "tax", "fintech"],
+      "keywords": ["bank", "finance", "loan", "insurance", "invest", "credit", "savings", "wealth", "mutual fund", "tax", "emi", "interest rate", "policy", "premium", "deposit", "account"]
+    },
+    {
+      "voice_id": "rripBBoZdgdbkJJfOOw5",
+      "label": "TVC Exciting",
+      "gender": "male",
+      "categories": ["tvc", "television", "exciting", "high_energy", "launch", "grand", "festival", "celebration", "sports", "entertainment", "automotive"],
+      "keywords": ["exciting", "launch", "grand", "festival", "diwali", "celebration", "new", "biggest", "ultimate", "blockbuster", "spectacular", "mega", "car", "bike", "sports", "cricket", "movie", "entertainment"]
+    },
+    {
+      "voice_id": "nyl7umSNahHbqZlZgJUb",
+      "label": "Medical Female",
+      "gender": "female",
+      "categories": ["medical", "healthcare", "hospital", "pharma", "health", "wellness", "doctor", "clinic"],
+      "keywords": ["health", "medical", "hospital", "doctor", "pharma", "medicine", "treatment", "care", "wellness", "clinic", "patient", "symptom", "disease", "therapy", "diagnostic"]
+    },
+    {
+      "voice_id": "dY9rLpO6OL8VAOTdrBOv",
+      "label": "Medical Smooth Female",
+      "gender": "female",
+      "categories": ["medical_smooth", "healthcare_calm", "wellness", "yoga", "ayurveda", "skincare", "beauty", "spa", "calm_health"],
+      "keywords": ["wellness", "ayurveda", "yoga", "skincare", "beauty", "spa", "gentle", "natural", "organic", "herbal", "smooth", "calm", "relaxing", "self-care", "glow", "skin", "hair"]
+    },
+    {
+      "voice_id": "4wUhJuJq0I6JVuqKatkK",
+      "label": "Government Ads Female",
+      "gender": "female",
+      "categories": ["government", "psa", "public_service", "awareness", "education", "social", "ngo", "campaign", "safety"],
+      "keywords": ["government", "sarkari", "public", "awareness", "safety", "education", "campaign", "scheme", "yojana", "jan", "swachh", "digital india", "social", "ngo", "rights", "citizen", "vote", "environment"]
+    },
+    {
+      "voice_id": "9RLZ658du87EC4JOFqJU",
+      "label": "Mobile Exciting Male",
+      "gender": "male",
+      "categories": ["mobile", "tech", "gadget", "electronics", "smartphone", "app", "gaming", "telecom", "internet", "startup"],
+      "keywords": ["mobile", "phone", "smartphone", "app", "tech", "gadget", "5g", "camera", "processor", "gaming", "download", "internet", "wifi", "data", "recharge", "plan", "speed", "smart", "ai", "laptop", "earbuds"]
+    }
+  ]
+}
