@@ -236,20 +236,23 @@ class FFmpegService {
         const normalizeSync = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
         // ── Voice chain ──────────────────────────────────────────────
-        // normalize → set volume → fade-in → delay
-        // The fade-in (0.5s) is applied to the voice audio BEFORE the
-        // delay so that when the voice enters the mix it ramps up from
-        // silence smoothly. The qsin curve starts gentle and accelerates,
-        // making the voice "emerge from" the music naturally.
+        // normalize → set volume → fade-in → fade-out → delay
+        // Fade-in (0.5s qsin): voice emerges smoothly from the music.
+        // Fade-out (1.0s qsin): voice exits gently so there's no sudden
+        // energy drop that makes the music feel like it "bumped up".
         const voiceEntryFade = 0.5; // seconds — smooth voice onset
-        const voiceFade = `afade=t=in:st=0:d=${voiceEntryFade}:curve=qsin`;
+        const voiceExitFade = 1.0; // seconds — smooth voice exit
+        const voiceExitStart = Math.max(0, voiceDuration - voiceExitFade);
+        const voiceFadeIn = `afade=t=in:st=0:d=${voiceEntryFade}:curve=qsin`;
+        const voiceFadeOut = `afade=t=out:st=${voiceExitStart.toFixed(3)}:d=${voiceExitFade}:curve=qsin`;
         const voiceBase = voiceDelaySec > 0
-          ? `[0:a]${normalizeSync},volume=${voiceVol},${voiceFade},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
-          : `[0:a]${normalizeSync},volume=${voiceVol},${voiceFade}`;
+          ? `[0:a]${normalizeSync},volume=${voiceVol},${voiceFadeIn},${voiceFadeOut},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
+          : `[0:a]${normalizeSync},volume=${voiceVol},${voiceFadeIn},${voiceFadeOut}`;
 
         logger.info('=== [STEP 5] VOICE CHAIN ===', {
           voiceVolume: voiceVol,
-          voiceEntryFade: `${voiceEntryFade}s`,
+          voiceEntryFade: `${voiceEntryFade}s (qsin)`,
+          voiceExitFade: `${voiceExitFade}s (qsin, starts at ${voiceExitStart.toFixed(3)}s)`,
           voiceDelay: voiceDelaySec > 0 ? `${voiceDelaySec.toFixed(2)}s (${Math.round(voiceDelaySec * 1000)}ms)` : 'none',
           voiceFilter: voiceBase,
         });
@@ -350,13 +353,15 @@ class FFmpegService {
           `[mixraw]atrim=0:${trimDuration.toFixed(3)},asetpts=PTS-STARTPTS[mixed]`,
         );
 
-        // Music stays flat at bed level after voice. afade handles the
-        // smooth fade-out starting from voice end — 'qsin' curve for a
-        // natural perceived decay, guaranteed to reach exactly zero.
-        // Smooth 1.5s fade-in so the entire mix emerges gently from silence.
+        // Music stays flat at bed level during voice. The fade-out starts
+        // 2s BEFORE voice ends so the music is already gently easing down
+        // as the voice fades out — no moment where "music alone at bed level"
+        // is audible (which sounds like a bump). The overlap creates a
+        // seamless transition: voice fading out + music fading out together.
         const fadeIn = Math.max(0.5, Math.min(2.0, voiceInput.fadeIn ?? 1.5));
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'tri';
-        const fadeOutStart = voiceTotalDuration;
+        const FADE_OVERLAP = 2.0; // start music fade before voice ends
+        const fadeOutStart = Math.max(0, voiceTotalDuration - FADE_OVERLAP);
         const fadeDuration = mixDuration - fadeOutStart;
 
         logger.info('Professional mix settings:', {
