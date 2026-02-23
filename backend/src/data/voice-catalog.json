@@ -53,6 +53,13 @@
       "gender": "male",
       "categories": ["mobile", "tech", "gadget", "electronics", "smartphone", "app", "gaming", "telecom", "internet", "startup"],
       "keywords": ["mobile", "phone", "smartphone", "app", "tech", "gadget", "5g", "camera", "processor", "gaming", "download", "internet", "wifi", "data", "recharge", "plan", "speed", "smart", "ai", "laptop", "earbuds"]
+    },
+    {
+      "voice_id": "jA33Su0OjqBj5hJKcEX2",
+      "label": "US Accent",
+      "gender": "male",
+      "categories": ["us", "american", "international", "global", "english", "western", "corporate", "tech", "startup", "saas", "premium", "luxury"],
+      "keywords": ["american", "us", "usa", "global", "international", "english", "western", "corporate", "premium", "luxury", "professional", "modern", "clean", "neutral", "startup", "saas", "tech", "digital"]
     }
   ]
 }

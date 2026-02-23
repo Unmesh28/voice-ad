@@ -68,7 +68,7 @@ class ElevenLabsProvider implements ITTSProvider {
       modelId: (options.model as string) || 'eleven_v3',
       voiceSettings: {
         stability: (settings.stability as number) ?? 0.5,
-        similarity_boost: (settings.similarity_boost as number) ?? 0.75,
+        similarity_boost: (settings.similarity_boost as number) ?? 1.0,
         style: (settings.style as number) ?? 0.0,
         use_speaker_boost: (settings.use_speaker_boost as boolean) ?? true,
       },
@@ -89,7 +89,7 @@ class ElevenLabsProvider implements ITTSProvider {
       modelId: (options.model as string) || 'eleven_v3',
       voiceSettings: {
         stability: (settings.stability as number) ?? 0.5,
-        similarity_boost: (settings.similarity_boost as number) ?? 0.75,
+        similarity_boost: (settings.similarity_boost as number) ?? 1.0,
         style: (settings.style as number) ?? 0.0,
         use_speaker_boost: (settings.use_speaker_boost as boolean) ?? true,
       },

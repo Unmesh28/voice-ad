@@ -207,7 +207,7 @@ const VoiceSelector = ({
                           Similarity Boost: {voiceSettings.similarity_boost?.toFixed(2)}
                         </Typography>
                         <Slider
-                          value={voiceSettings.similarity_boost || 0.75}
+                          value={voiceSettings.similarity_boost ?? 1.0}
                           onChange={(_, value) =>
                             handleSettingChange('similarity_boost', value as number)
                           }
