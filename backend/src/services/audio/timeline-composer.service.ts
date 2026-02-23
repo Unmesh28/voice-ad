@@ -807,8 +807,8 @@ class TimelineComposerService {
         const totalInputs = 1 + validEntries.length; // music + voice/sfx entries
         const filters: string[] = [];
 
-        // Normalize music input with smooth 1.5s fade-in from silence
-        filters.push(`[0:a]${NORMALIZE_FILTER},afade=t=in:st=0:d=1.5:curve=tri[music]`);
+        // Normalize music input — tiny anti-click only (no fade from silence)
+        filters.push(`[0:a]${NORMALIZE_FILTER},afade=t=in:st=0:d=0.05:curve=tri[music]`);
 
         // Normalize and position each voice/SFX input
         const mixLabels: string[] = ['[music]'];
@@ -855,16 +855,14 @@ class TimelineComposerService {
         // tail, undoing the fade. Tracks are already pre-normalized.
         filters.push('[trimmed]anull[normed]');
 
-        // Fade-out: starts at voice end. The volume envelope already eased
-        // the music down subtly in the last seconds, so this continues that
-        // trajectory smoothly to silence. qsin curve for natural decay.
-        const clampedFadeIn = Math.max(0.5, Math.min(2.0, fadeIn || 1.5));
-        const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
+        // Fade-in: tiny anti-click only — no ramp from silence.
+        // Fade-out: starts at voice end, smooth qsin curve to silence.
+        const antiClick = 0.05;
         const fadeOutStart = lastVoiceEndTime;
         const fadeDuration = totalDuration - fadeOutStart;
         if (fadeDuration > 0.5) {
           filters.push(
-            `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
+            `[normed]afade=t=in:st=0:d=${antiClick}:curve=tri,` +
             `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin[out]`
           );
           logger.info('Music fade-out:', {
@@ -876,7 +874,7 @@ class TimelineComposerService {
         } else {
           // No room for fade — just anti-click fade-in
           filters.push(
-            `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve}[out]`
+            `[normed]afade=t=in:st=0:d=${antiClick}:curve=tri[out]`
           );
         }
 
