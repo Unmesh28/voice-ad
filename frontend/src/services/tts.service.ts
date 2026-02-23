@@ -50,7 +50,7 @@ class TTSService {
 
   async previewVoice(voiceId: string, text?: string): Promise<Blob> {
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/tts/voices/${voiceId}/preview`,
+      `${import.meta.env.VITE_API_URL || 'http://localhost:5011/api'}/tts/voices/${voiceId}/preview`,
       {
         method: 'POST',
         headers: {

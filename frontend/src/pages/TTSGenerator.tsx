@@ -27,7 +27,7 @@ const TTSGenerator = () => {
     mutationFn: (data: { text: string; voiceId: string; voiceSettings: any }) =>
       ttsService.generateTTSFromText(data),
     onSuccess: (data) => {
-      const fullUrl = `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000'}${data.audioUrl}`;
+      const fullUrl = `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5011'}${data.audioUrl}`;
       setAudioUrl(fullUrl);
       toast.success('Audio generated successfully!');
     },

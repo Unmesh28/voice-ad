@@ -58,5 +58,5 @@ echo -e "  Restart: pm2 restart all"
 echo -e "  Stop: pm2 stop all"
 
 echo -e "\n${GREEN}VoiceAd Platform is now running!${NC}"
-echo -e "Backend API: http://localhost:5000"
-echo -e "Health check: http://localhost:5000/health"
+echo -e "Backend API: http://localhost:5011"
+echo -e "Health check: http://localhost:5011/health"

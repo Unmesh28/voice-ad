@@ -41,7 +41,7 @@ server {
 
     # Backend API proxy
     location /api/ {
-        proxy_pass http://localhost:5000/api/;
+        proxy_pass http://localhost:5011/api/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';

@@ -90,7 +90,7 @@ const Production = () => {
   const mixProductionMutation = useMutation({
     mutationFn: (id: string) => productionService.mixProductionSync(id),
     onSuccess: (data) => {
-      const fullUrl = `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000'}${data.outputUrl}`;
+      const fullUrl = `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5011'}${data.outputUrl}`;
       setProduction((prev) => prev ? { ...prev, outputUrl: fullUrl, status: 'COMPLETED', progress: 100 } : null);
       toast.success('Audio production completed successfully!');
     },
