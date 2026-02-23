@@ -250,7 +250,7 @@ class FFmpegService {
           'highpass=f=80',
           'equalizer=f=120:w=200:g=-3',
           'equalizer=f=3500:w=2000:g=3',
-          'acompressor=threshold=-18dB:ratio=3:attack=5:release=80:makeup=3',
+          'acompressor=threshold=-10dB:ratio=3:attack=5:release=80:makeup=3',
           'stereotools=mlev=0.02',
           'aecho=0.8:0.9:25:0.15',
           'loudnorm=I=-16:TP=-1.5:LRA=7',
