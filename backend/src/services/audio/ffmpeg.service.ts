@@ -263,8 +263,9 @@ class FFmpegService {
         ];
 
         // ── Music chain ─────────────────────────────────────────────
-        // Music starts at introVol, then eases down by 15% over 2s when
-        // voice enters. Gentle enough to be imperceptible as a "drop".
+        // Music plays at introVol during the intro, then when voice
+        // enters the duck starts simultaneously — voice masks the
+        // gradual cosine transition from intro → bed. No silent drop.
         // When music is shorter than mixDuration, LOOP the music instead
         // of padding with silence. apad adds silence which makes the
         // outro tail completely inaudible. aloop replays the actual
@@ -310,8 +311,11 @@ class FFmpegService {
         const easeDownVol = musicBedVol * 0.85; // just 15% quieter — barely noticeable
 
         if (voiceDelaySec > 0.1) {
-          const rampStart = Math.max(0, voiceDelaySec - rampDuration).toFixed(3);
-          const rampEnd = voiceDelaySec.toFixed(3);
+          // Duck starts WHEN the voice enters (not before). The voice
+          // masks the gradual volume reduction so the listener never
+          // hears a "drop" — just music playing, then voice + gentle ease.
+          const rampStart = voiceDelaySec.toFixed(3);
+          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
           const easeV = easeDownVol.toFixed(4);
@@ -319,19 +323,19 @@ class FFmpegService {
           const voiceEndStr = voiceTotalDuration.toFixed(3);
           const duckEase = cosineEase('t', rampStart, rampDuration.toFixed(3));
           const easeEase = cosineEase('t', easeStartStr, EASE_DOWN_DUR.toFixed(3));
-          // 5-phase: intro → duck → bed → ease-down → hold
+          // 5-phase: intro → duck (with voice) → bed → ease-down → hold
           musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*${duckEase},if(lt(t,${easeStartStr}),${bedV},if(lt(t,${voiceEndStr}),${bedV}-(${bedV}-${easeV})*${easeEase},${easeV}))))':eval=frame`;
 
           logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE ===', {
-            mode: 'intro_bed_ease_hold',
-            rampStart: `${rampStart}s`,
-            rampEnd: `${rampEnd}s`,
+            mode: 'intro_duck_with_voice_ease_hold',
+            rampStart: `${rampStart}s (voice enters here)`,
+            rampEnd: `${rampEnd}s (duck finishes)`,
             easeDownStart: `${easeStartStr}s`,
             voiceEnd: `${voiceEndStr}s`,
             musicIntro: introV,
             musicBed: bedV,
             easeDownVol: easeV,
-            note: 'Cosine transitions everywhere, subtle ease near end',
+            note: 'Duck happens DURING voice — no silent drop',
           });
         } else {
           const bedV = musicBedVol.toFixed(4);
