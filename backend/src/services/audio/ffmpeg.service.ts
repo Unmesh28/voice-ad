@@ -241,18 +241,21 @@ class FFmpegService {
         // 1. highpass: remove rumble / plosive energy below 80 Hz
         // 2. EQ 120 Hz cut: reduce muddiness in low-mids
         // 3. EQ 3.5 kHz boost: add presence & clarity for intelligibility
-        // 4. compressor: even out TTS dynamics (threshold -18 dB, 3:1)
+        // 4. compressor: gentle peak-catching only (-3 dB threshold, 1.5:1)
+        //    — slow release (200ms) prevents audible "breathing" / pumping
         // 5. stereotools: very subtle stereo width (mlev=0.02)
         // 6. aecho: hint of room ambience so voice doesn't sound "flat"
-        // 7. loudnorm: EBU R128 normalization (-16 LUFS, -1.5 TP)
+        //
+        // NOTE: No loudnorm here. Single-pass loudnorm dynamically boosts
+        // quiet sections (pauses between words) and reduces loud parts,
+        // causing the music to appear to "pump" up and down when mixed.
         const vocalProcessing = [
           'highpass=f=80',
           'equalizer=f=120:w=200:g=-3',
           'equalizer=f=3500:w=2000:g=3',
-          'acompressor=threshold=-10dB:ratio=3:attack=5:release=80:makeup=3',
+          'acompressor=threshold=-3dB:ratio=1.5:attack=10:release=200:makeup=1',
           'stereotools=mlev=0.02',
           'aecho=0.8:0.9:25:0.15',
-          'loudnorm=I=-16:TP=-1.5:LRA=7',
         ].join(',');
 
         // Fade-in (1.2s qsin): voice emerges very gradually from the music

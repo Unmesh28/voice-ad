@@ -370,38 +370,16 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     // Get duration
     let duration = await ffmpegService.getAudioDuration(outputPath);
 
-    // ── Post-mix duration enforcement ────────────────────────────────
-    // If the final mix significantly exceeds the target duration,
-    // apply atempo to compress it, then re-apply fade-out because
-    // atempo squishes the original fade.
+    // ── Post-mix duration note ────────────────────────────────
+    // Previously applied atempo time-stretching here when the mix
+    // exceeded maxDuration. REMOVED because atempo introduces phase
+    // artifacts and perceived volume fluctuations that make the ad
+    // sound unprofessional. Duration is now enforced BEFORE mixing
+    // (via maxDuration passed to mixAudio, which trims the music tail).
     if (maxDuration && maxDuration > 0 && duration > maxDuration * 1.15) {
-      const ratio = duration / maxDuration;
-      // Only adjust up to 1.25x speed to keep audio natural
-      const clampedRatio = Math.min(1.25, ratio);
-      const adjustedTarget = duration / clampedRatio;
-
-      logger.info(`Post-mix duration enforcement: ${duration.toFixed(1)}s exceeds target ${maxDuration}s by ${((ratio - 1) * 100).toFixed(0)}%. Applying atempo=${clampedRatio.toFixed(2)}`, {
+      logger.warn(`Post-mix duration ${duration.toFixed(1)}s exceeds target ${maxDuration}s by ${(((duration / maxDuration) - 1) * 100).toFixed(0)}%. Accepting as-is (no atempo — it introduces artifacts).`, {
         productionId,
       });
-
-      const adjustedPath = outputPath.replace(/\.(mp3|wav|aac)$/, '_adj.$1');
-      try {
-        await ffmpegService.stretchAudioToDuration(outputPath, adjustedTarget, adjustedPath);
-        const fsSync = require('fs');
-        fsSync.unlinkSync(outputPath);
-        fsSync.renameSync(adjustedPath, outputPath);
-
-        // Re-apply smooth fade-out after atempo squished the original
-        const fadedPath = outputPath.replace(/\.(mp3|wav|aac)$/, '_faded.$1');
-        await ffmpegService.applyFadeOut(outputPath, fadedPath, 3.0);
-        fsSync.unlinkSync(outputPath);
-        fsSync.renameSync(fadedPath, outputPath);
-
-        duration = await ffmpegService.getAudioDuration(outputPath);
-        logger.info(`Post-mix adjusted: ${duration.toFixed(1)}s (target: ${maxDuration}s, fade repaired)`, { productionId });
-      } catch (atempoErr: any) {
-        logger.warn(`Post-mix atempo failed, keeping original: ${atempoErr.message}`, { productionId });
-      }
     }
 
     const productionUrl = `/uploads/productions/${filename}`;
