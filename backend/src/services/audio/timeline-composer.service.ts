@@ -837,8 +837,8 @@ class TimelineComposerService {
         const totalInputs = 1 + validEntries.length; // music + voice/sfx entries
         const filters: string[] = [];
 
-        // Normalize music input with gentle fade-in for smooth start
-        filters.push(`[0:a]${NORMALIZE_FILTER},afade=t=in:st=0:d=0.8:curve=tri[music]`);
+        // Normalize music input with smooth 1.5s fade-in from silence
+        filters.push(`[0:a]${NORMALIZE_FILTER},afade=t=in:st=0:d=1.5:curve=tri[music]`);
 
         // Normalize and position each voice/SFX input
         const mixLabels: string[] = ['[music]'];
@@ -886,7 +886,8 @@ class TimelineComposerService {
         //   'qsin' (quarter-sine) is guaranteed to reach EXACTLY zero
         //   at the end — no residual signal, no click at the trim point.
         //   Perceived as natural: gentle initial decay, accelerating.
-        const clampedFadeIn = Math.max(0.02, Math.min(0.12, fadeIn));
+        // Smooth 1.5s fade-in so the mix gently emerges from silence
+        const clampedFadeIn = Math.max(0.5, Math.min(2.0, fadeIn || 1.5));
         const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
         const fadeDuration = totalDuration - swellEndTime;
         if (fadeDuration > 0.5) {

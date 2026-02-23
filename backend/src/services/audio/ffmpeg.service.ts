@@ -288,10 +288,11 @@ class FFmpegService {
         const barDur = opts.barDuration ?? 0;
         const rampDuration = barDur > 0.5 ? barDur : 4.0;
 
-        // Outro: after voice ends, music swells to a moderate peak then holds FLAT.
+        // Outro: after voice ends, music swells gently then holds FLAT.
+        // Subtle lift (1.5x) over 4s so the transition is barely noticeable.
         // afade handles the actual smooth fade-out (no double-fade).
-        const outroVol = Math.min(Math.max(musicIntroVol * 2.5, 0.25), 0.40);
-        const outroSwellEnd = voiceTotalDuration + 3.0; // 3s swell
+        const outroVol = Math.min(Math.max(musicIntroVol * 1.5, 0.15), 0.25);
+        const outroSwellEnd = voiceTotalDuration + 4.0; // 4s gentle swell
         const outroSwellEndStr = outroSwellEnd.toFixed(3);
 
         if (voiceDelaySec > 0.1) {
@@ -359,7 +360,8 @@ class FFmpegService {
         // A single afade handles the smooth fade-out starting from
         // swell peak — 'qsin' curve: guaranteed to reach exactly zero,
         // natural perceived decay, no click at trim point.
-        const fadeIn = Math.max(0.02, Math.min(0.15, voiceInput.fadeIn ?? 0.05));
+        // Smooth 1.5s fade-in so the entire mix emerges gently from silence
+        const fadeIn = Math.max(0.5, Math.min(2.0, voiceInput.fadeIn ?? 1.5));
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'tri';
         const fadeDuration = mixDuration - outroSwellEnd;
 
