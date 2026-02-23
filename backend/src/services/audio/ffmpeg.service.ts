@@ -174,10 +174,11 @@ class FFmpegService {
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-        // Music intro plays at a higher volume, then eases smoothly into
-        // the bed level when voice enters. This creates a natural fade-in feel.
+        // Music intro plays at a higher volume, then eases ultra-smoothly into
+        // the bed level when voice enters. The gap is kept small (80%) so the
+        // transition is nearly imperceptible — just enough to let voice sit above.
         const musicIntroVol = musicInput.volume !== undefined ? musicInput.volume : 0.18;
-        const musicBedVol = musicIntroVol * 0.65; // bed is ~65% of intro — very gentle drop
+        const musicBedVol = musicIntroVol * 0.80; // bed is 80% of intro — very subtle drop
 
         logger.info('=== [STEP 2] VOLUME SETTINGS ===', {
           voiceVolumeInput: voiceInput.volume,
@@ -306,12 +307,11 @@ class FFmpegService {
 
         let musicVolumeFilter: string;
 
-        // When bar duration is known, ramp over exactly 2 bars so the
-        // transition feels musical and ultra-gradual. The listener should
-        // never consciously notice the volume changing.
-        // Fallback: 8 seconds — slow enough that the change is imperceptible.
+        // Ultra-slow ramp so the duck is completely imperceptible.
+        // When bar duration is known, ramp over 4 bars. Otherwise 15 seconds —
+        // so gradual the listener never notices the volume changing.
         const barDur = opts.barDuration ?? 0;
-        const rampDuration = barDur > 0.5 ? barDur * 2 : 8.0;
+        const rampDuration = barDur > 0.5 ? barDur * 4 : 15.0;
 
         // Volume envelope shape — all transitions use cosine S-curves so
         // the change is gradual at start AND end (no hard corners):
@@ -402,14 +402,16 @@ class FFmpegService {
           mixDuration: `${mixDuration}s`,
           fadeIn: `${fadeIn}s (anti-click only)`,
           fadeOutStart: `${fadeOutStart.toFixed(1)}s (${HOLD_AFTER_VOICE}s after voice ends)`,
-          fadeOut: `${fadeDuration.toFixed(1)}s (exp, to silence)`,
+          fadeOut: `${fadeDuration.toFixed(1)}s (qsin, ultra-smooth to silence)`,
           approach: 'intro (voice starts) → slow duck → bed → hold at bed → gradual fade-out → silence',
         });
 
-        // Anti-click fade-in (linear, 50ms). Fade-out uses exp for smooth decay.
+        // Anti-click fade-in (linear, 50ms). Fade-out uses qsin (quarter sine)
+        // for the smoothest perceptual decay — unlike exp which drops fast at
+        // the start, qsin eases out very gradually then accelerates to silence.
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=tri`;
         if (fadeDuration > 0.5) {
-          const fadeOutFilter = `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=exp`;
+          const fadeOutFilter = `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin`;
           filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
         } else {
           filters.push(`[mixed]${fadeInFilter}[faded]`);
