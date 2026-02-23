@@ -174,10 +174,10 @@ class FFmpegService {
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-        // Music intro plays at the configured volume, then drops by only
-        // 20% when voice enters — subtle enough to not sound like a dip.
-        const musicIntroVol = musicInput.volume !== undefined ? musicInput.volume : 0.15;
-        const musicBedVol = musicIntroVol * 0.80; // exactly 20% drop from original
+        // Music plays at a low, consistent volume throughout — no ducking
+        // when voice enters. The music bed stays flat under the voiceover.
+        const musicIntroVol = musicInput.volume !== undefined ? musicInput.volume : 0.10;
+        const musicBedVol = musicIntroVol; // no drop — same volume during voice
 
         logger.info('=== [STEP 2] VOLUME SETTINGS ===', {
           voiceVolumeInput: voiceInput.volume,
@@ -185,7 +185,7 @@ class FFmpegService {
           musicVolumeInput: musicInput.volume,
           musicIntroVol: musicIntroVol.toFixed(4),
           musicBedVol: musicBedVol.toFixed(4),
-          musicDropPercent: `${((1 - musicBedVol / musicIntroVol) * 100).toFixed(1)}% reduction from intro`,
+          note: 'No ducking — music stays flat under voice',
         });
 
         // Voice delay: when blueprint alignment says voice should enter on a
@@ -288,9 +288,9 @@ class FFmpegService {
         const barDur = opts.barDuration ?? 0;
         const rampDuration = barDur > 0.5 ? barDur : 4.0;
 
-        // Outro: after voice ends, music swells to peak then holds FLAT.
+        // Outro: after voice ends, music swells to a moderate peak then holds FLAT.
         // afade handles the actual smooth fade-out (no double-fade).
-        const outroVol = Math.min(Math.max(musicIntroVol * 3.0, 0.35), 0.50);
+        const outroVol = Math.min(Math.max(musicIntroVol * 2.5, 0.25), 0.40);
         const outroSwellEnd = voiceTotalDuration + 3.0; // 3s swell
         const outroSwellEndStr = outroSwellEnd.toFixed(3);
 

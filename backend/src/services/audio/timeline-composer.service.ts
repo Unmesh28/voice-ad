@@ -537,10 +537,9 @@ class TimelineComposerService {
   /**
    * Resolve the actual music volume for a segment based on its behavior.
    *
-   * Key design rule: ducked music should only be 20% quieter than full music.
-   * The LLM often outputs very low values (0.15-0.20) which make the music
-   * essentially disappear. We enforce a minimum of 80% of full volume for
-   * ducked segments so the music bed stays present under the voice.
+   * Key design rule: music volume stays flat — no ducking during voiceover.
+   * The music starts at a low, consistent level and does not drop when
+   * voice enters. This keeps the mix clean without volume pumping.
    */
   private resolveMusicVolume(
     behavior: MusicBehavior,
@@ -549,13 +548,12 @@ class TimelineComposerService {
   ): number {
     switch (behavior) {
       case 'full':
-        // Full music: use explicit volume if given, otherwise strong presence
-        return segmentVolume !== undefined ? Math.max(segmentVolume, 0.30) : 0.50;
+        // Full music: use explicit volume if given, otherwise moderate presence
+        return segmentVolume !== undefined ? Math.max(segmentVolume, 0.20) : 0.35;
       case 'ducked':
-        // Ducked = only 20% reduction from full. The sidechain compressor
-        // handles real-time dynamic ducking on top of this, so the base
-        // level must stay high. Ignore LLM's low values (0.15-0.20).
-        return 0.40;
+        // No ducking — keep music at the same level as full.
+        // Voice clarity is achieved by starting music low, not by dipping it.
+        return 0.35;
       case 'building':
         return segmentVolume !== undefined ? segmentVolume : baseMusicVolume * 2.0;
       case 'resolving':

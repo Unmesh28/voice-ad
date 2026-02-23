@@ -293,8 +293,8 @@ export class ProductionOrchestrator {
         fadeIn: mp.fadeInSeconds,
         fadeOut: mp.fadeOutSeconds,
         fadeCurve: mp.fadeCurve,
-        audioDucking: mp.audioDucking,
-        duckingAmount: mp.duckingAmount,
+        audioDucking: false,      // No ducking — music stays flat under voice
+        duckingAmount: 0,
         musicDelay: mp.musicDelay,
         outputFormat: 'mp3',
         normalizeLoudness: true,
@@ -313,16 +313,6 @@ export class ProductionOrchestrator {
       if (scriptMetadata?.volume) {
         mixSettings.voiceVolume = scriptMetadata.volume.voiceVolume ?? mp.voiceVolume;
         mixSettings.musicVolume = scriptMetadata.volume.musicVolume ?? mp.musicVolume;
-        if (scriptMetadata.volume.segments?.length) mixSettings.volumeSegments = scriptMetadata.volume.segments;
-      }
-      if (scriptMetadata?.mixPreset) {
-        mixSettings.mixPreset = scriptMetadata.mixPreset;
-        const presetDucking: Record<string, number> = {
-          voiceProminent: 0.6,
-          balanced: 0.35,
-          musicEmotional: 0.2,
-        };
-        mixSettings.duckingAmount = presetDucking[scriptMetadata.mixPreset] ?? mp.duckingAmount;
       }
 
       logger.info(`=== [ORCHESTRATOR] FINAL MIX SETTINGS SAVED for production ${productionId} ===`, {
@@ -576,8 +566,8 @@ export class ProductionOrchestrator {
     const outputFilename = `production_${productionId}_${uuidv4()}.mp3`;
     const outputPath = path.join(productionsDir, outputFilename);
 
-    // Resolve mix settings from LLM metadata
-    const baseMusicVolume = scriptMetadata?.volume?.musicVolume ?? 0.15;
+    // Resolve mix settings from LLM metadata — lower base volume, no ducking
+    const baseMusicVolume = scriptMetadata?.volume?.musicVolume ?? 0.10;
     const fadeIn = scriptMetadata?.fades?.fadeInSeconds ?? 0.08;
     const fadeOut = scriptMetadata?.fades?.fadeOutSeconds ?? 0.4;
     const fadeCurve = scriptMetadata?.fades?.curve ?? 'exp';

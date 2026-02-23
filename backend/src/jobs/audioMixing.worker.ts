@@ -87,7 +87,7 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
     });
 
     const voiceVolume = settings.voiceVolume !== undefined ? settings.voiceVolume : 1.0;
-    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.25;
+    const musicVolume = settings.musicVolume !== undefined ? settings.musicVolume : 0.10;
     // Fade-in: tiny anti-click (0.05s). Fade-out: applied to music tail after voice ends.
     const rawFadeIn = settings.fadeIn ?? 0.05;
     const rawFadeOut = settings.fadeOut ?? 2.0;
@@ -249,64 +249,11 @@ const processAudioMixing = async (job: Job<AudioMixingJobData>) => {
       await job.updateProgress(55);
     }
 
-    // ========== BEAT-AWARE DUCKING ==========
-    // When alignment result is available, apply beat-aware ducking
-    // (duck boundaries snap to beats). Otherwise fall back to per-sentence volume.
-    if (alignmentResult && alignmentResult.duckingSegments.length > 0 && finalMusicPath) {
-      // Convert ducking segments to volume curve entries
-      // The ducking segments are in absolute mix time (music time, with voice delay applied)
-      const totalMusicDuration = await ffmpegService.getAudioDuration(finalMusicPath);
-      const curve: { startSeconds: number; endSeconds: number; volumeMultiplier: number }[] = [];
-
-      for (const seg of alignmentResult.duckingSegments) {
-        curve.push({
-          startSeconds: Math.max(0, seg.startTime),
-          endSeconds: Math.min(totalMusicDuration, seg.endTime),
-          volumeMultiplier: seg.duckLevel,
-        });
-      }
-
-      if (curve.length > 0) {
-        const curvedFilename = `ducked_music_${uuidv4()}.mp3`;
-        const musicDir = path.join(uploadDir, 'music');
-        const curvedMusicPath = path.join(musicDir, curvedFilename);
-        if (!fs.existsSync(musicDir)) fs.mkdirSync(musicDir, { recursive: true });
-        await ffmpegService.applyVolumeCurve(finalMusicPath, curve, totalMusicDuration, curvedMusicPath);
-        finalMusicPath = curvedMusicPath;
-        logger.info(`[Tier 3] Applied beat-aware ducking (${curve.length} segments) for production ${productionId}`);
-      }
-    } else if (
-      Array.isArray(sentenceCues) &&
-      sentenceCues.length > 0 &&
-      Array.isArray(sentenceTimings) &&
-      sentenceTimings.length > 0 &&
-      finalMusicPath &&
-      voicePath
-    ) {
-      // Fallback: simple per-sentence volume curve (Tier 1 behavior)
-      const voiceDuration = await ffmpegService.getAudioDuration(voicePath);
-      const cueByIndex = new Map(sentenceCues.map((c) => [c.index, c]));
-      const curve: { startSeconds: number; endSeconds: number; volumeMultiplier: number }[] = [];
-      for (let i = 0; i < sentenceTimings.length; i++) {
-        const t = sentenceTimings[i];
-        const cue = cueByIndex.get(i);
-        const mult = cue?.musicVolumeMultiplier != null ? Math.max(0.1, Math.min(3, cue.musicVolumeMultiplier)) : 1;
-        curve.push({
-          startSeconds: Math.max(0, t.startSeconds),
-          endSeconds: Math.min(voiceDuration, t.endSeconds),
-          volumeMultiplier: mult,
-        });
-      }
-      if (curve.length > 0) {
-        const curvedFilename = `curved_music_${uuidv4()}.mp3`;
-        const musicDir = path.join(uploadDir, 'music');
-        const curvedMusicPath = path.join(musicDir, curvedFilename);
-        if (!fs.existsSync(musicDir)) fs.mkdirSync(musicDir, { recursive: true });
-        await ffmpegService.applyVolumeCurve(finalMusicPath, curve, voiceDuration, curvedMusicPath);
-        finalMusicPath = curvedMusicPath;
-        logger.info(`Applied per-sentence music volume (${curve.length} segments) for production ${productionId}`);
-      }
-    }
+    // ========== DUCKING DISABLED ==========
+    // Music volume stays flat throughout — no beat-aware ducking or
+    // per-sentence volume curves. The music starts low and holds steady
+    // under the voiceover for a clean, consistent mix.
+    logger.info(`[Mix] Music ducking disabled — volume stays flat under voice for production ${productionId}`);
 
     // Target ad duration from the production context — used to cap the mix
     // so content never runs over the selected duration (graceful fade-out, not hard cut).
