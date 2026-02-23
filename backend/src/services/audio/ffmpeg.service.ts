@@ -129,8 +129,8 @@ class FFmpegService {
    *  2. Voice sits ~12-15 dB above music for clear intelligibility.
    *  3. Separation comes from level difference + EQ carving (done upstream),
    *     NOT from dynamic ducking.
-   *  4. After voice ends, music continues for a short tail (1 s) with a smooth
-   *     exponential fade-out.
+   *  4. After voice ends, music holds at bed volume briefly, then gradually
+   *     fades out with a smooth exponential curve.
    *  5. Final loudnorm pass brings the mix to broadcast target.
    */
   private async mixVoiceAndMusic(opts: {
@@ -211,8 +211,8 @@ class FFmpegService {
         }
 
         // Mix duration: voice plays fully, then music tail for smooth fade-out.
-        // 14s gives a long, cinematic tail — music rises back and THEN fades.
-        const MUSIC_TAIL = 14.0;
+        // After voice ends, music holds at bed volume briefly then fades out.
+        const MUSIC_TAIL = 8.0;
         let mixDuration = voiceTotalDuration + MUSIC_TAIL;
 
         // Enforce maxDuration: the tail must fit WITHIN the slot.
@@ -315,76 +315,47 @@ class FFmpegService {
 
         // Volume envelope shape — all transitions use cosine S-curves so
         // the change is gradual at start AND end (no hard corners):
-        //   1. INTRO: music at introVol
-        //   2. DUCK: ultra-slow cosine from introVol → bedVol (8s or 2 bars)
+        //   1. INTRO: music at introVol (before voice)
+        //   2. DUCK: slow gradual cosine from introVol → bedVol (8s or 2 bars)
         //   3. BED: constant bedVol throughout voiceover
-        //   4. EASE-DOWN: imperceptible cosine bed → 92% bed in last 6s
-        //   5. RISE-BACK: after voice ends, cosine ease from easeDown → introVol
-        //      over 6s — music "breathes back" naturally before fade-out
-        //   6. HOLD: stays at introVol; afade handles smooth fade to silence
+        //   4. HOLD: after voice ends, stay at bedVol — afade handles fade to silence
         //
         // Cosine ease-in-out: 0.5 - 0.5*cos(PI*(t-start)/duration)
         // S-curve that starts slow, accelerates, ends slow — no hard corners.
         const cosineEase = (tVar: string, start: string, dur: string) =>
           `(0.5-0.5*cos(PI*(${tVar}-${start})/${dur}))`;
 
-        // Ultra-subtle ease-down in the last 6s of voiceover — so gradual
-        // that it's completely imperceptible, just gently prepares for rise-back
-        const EASE_DOWN_DUR = 6.0;
-        const easeDownStart = Math.max(0, voiceTotalDuration - EASE_DOWN_DUR);
-        const easeDownVol = musicBedVol * 0.92; // only 8% quieter — truly imperceptible
-
-        // After voice ends, music rises back to intro volume over 6s
-        // This creates a smooth "music returning" feel instead of a
-        // sudden volume jump or staying artificially quiet
-        const RISE_BACK_DUR = 6.0;
-        const riseBackEnd = voiceTotalDuration + RISE_BACK_DUR;
+        // Hold duration: after voice ends, keep bed volume for a brief
+        // moment before the afade kicks in for a smooth fade-out.
+        const HOLD_AFTER_VOICE = 2.0;
 
         if (voiceDelaySec > 0.1) {
           const rampStart = voiceDelaySec.toFixed(3);
           const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          const easeV = easeDownVol.toFixed(4);
-          const easeStartStr = easeDownStart.toFixed(3);
-          const voiceEndStr = voiceTotalDuration.toFixed(3);
-          const riseEndStr = riseBackEnd.toFixed(3);
           const duckEase = cosineEase('t', rampStart, rampDuration.toFixed(3));
-          const easeEase = cosineEase('t', easeStartStr, EASE_DOWN_DUR.toFixed(3));
-          const riseEase = cosineEase('t', voiceEndStr, RISE_BACK_DUR.toFixed(3));
-          // 6-phase: intro → duck → bed → ease-down → rise-back → hold
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*${duckEase},if(lt(t,${easeStartStr}),${bedV},if(lt(t,${voiceEndStr}),${bedV}-(${bedV}-${easeV})*${easeEase},if(lt(t,${riseEndStr}),${easeV}+(${introV}-${easeV})*${riseEase},${introV})))))':eval=frame`;
+          // 3-phase: intro → duck → bed (holds through voiceover and after)
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*${duckEase},${bedV}))':eval=frame`;
 
           logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE ===', {
-            mode: 'intro_duck_bed_ease_rise_hold',
+            mode: 'intro_duck_bed_hold',
             rampStart: `${rampStart}s (voice enters)`,
             rampEnd: `${rampEnd}s (duck finishes over ${rampDuration.toFixed(1)}s)`,
-            easeDownStart: `${easeStartStr}s`,
-            voiceEnd: `${voiceEndStr}s`,
-            riseBackEnd: `${riseEndStr}s (music returns to intro vol)`,
+            voiceEnd: `${voiceTotalDuration.toFixed(3)}s`,
             musicIntro: introV,
             musicBed: bedV,
-            easeDownVol: easeV,
-            note: 'All transitions use cosine S-curves — imperceptible changes',
+            note: 'Bed volume holds after voice ends — afade handles fade-out',
           });
         } else {
           const bedV = musicBedVol.toFixed(4);
-          const introV = musicIntroVol.toFixed(4);
-          const easeV = easeDownVol.toFixed(4);
-          const easeStartStr = easeDownStart.toFixed(3);
-          const voiceEndStr = voiceTotalDuration.toFixed(3);
-          const riseEndStr = riseBackEnd.toFixed(3);
-          const easeEase = cosineEase('t', easeStartStr, EASE_DOWN_DUR.toFixed(3));
-          const riseEase = cosineEase('t', voiceEndStr, RISE_BACK_DUR.toFixed(3));
-          // No intro delay — bed → ease-down → rise-back → hold
-          musicVolumeFilter = `volume='if(lt(t,${easeStartStr}),${bedV},if(lt(t,${voiceEndStr}),${bedV}-(${bedV}-${easeV})*${easeEase},if(lt(t,${riseEndStr}),${easeV}+(${introV}-${easeV})*${riseEase},${introV})))':eval=frame`;
+          // No intro delay — constant bed volume, afade handles fade-out
+          musicVolumeFilter = `volume=${bedV}:eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME (bed → ease → rise → hold) ===', {
-            mode: 'bed_ease_rise_hold',
+          logger.info('=== [STEP 4] MUSIC VOLUME (constant bed) ===', {
+            mode: 'bed_hold',
             musicBed: bedV,
-            easeDownVol: easeV,
-            easeDownStart: `${easeStartStr}s`,
-            riseBackEnd: `${riseEndStr}s`,
+            note: 'No voice delay — flat bed volume, afade handles fade-out',
           });
         }
 
@@ -414,12 +385,10 @@ class FFmpegService {
         // The ear expects exponential growth, so this sounds "natural".
         const fadeIn = Math.max(1.5, Math.min(4.0, voiceInput.fadeIn ?? 3.0));
 
-        // ── Fade-out: starts AFTER music has risen back ──────────
-        // The rise-back takes RISE_BACK_DUR (6s) after voice ends.
-        // We start the fade 2s before rise-back finishes so they
-        // overlap slightly — the rise slows to a stop while the
-        // fade gently takes over. No sudden "peak then drop".
-        const fadeOutStart = riseBackEnd - 2.0;
+        // ── Fade-out: starts after brief hold at bed volume ──────
+        // After voice ends, music holds at bed volume for HOLD_AFTER_VOICE
+        // seconds, then the fade gradually brings it to silence.
+        const fadeOutStart = voiceTotalDuration + HOLD_AFTER_VOICE;
         const fadeDuration = Math.max(2.0, mixDuration - fadeOutStart);
 
         logger.info('Professional mix settings:', {
@@ -431,9 +400,9 @@ class FFmpegService {
           musicDuration: `${musicDuration.toFixed(1)}s`,
           mixDuration: `${mixDuration}s`,
           fadeIn: `${fadeIn}s (exp)`,
-          fadeOutStart: `${fadeOutStart.toFixed(1)}s (2s before rise-back ends)`,
+          fadeOutStart: `${fadeOutStart.toFixed(1)}s (${HOLD_AFTER_VOICE}s after voice ends)`,
           fadeOut: `${fadeDuration.toFixed(1)}s (exp, to silence)`,
-          approach: 'intro → bed → ease → rise-back → overlap-fade → silence',
+          approach: 'intro → duck → bed → hold at bed → gradual fade-out → silence',
         });
 
         // exp curve for both — mimics natural acoustic decay/growth.
@@ -459,9 +428,10 @@ class FFmpegService {
 
         logger.info('=== [STEP 7] MIX SUMMARY ===', {
           musicPlaysAloneFor: voiceDelaySec > 0 ? `${voiceDelaySec.toFixed(2)}s at volume ${musicIntroVol.toFixed(4)}` : '0s (voice starts immediately)',
-          musicRampsDown: voiceDelaySec > 0.1 ? `from ${musicIntroVol.toFixed(4)} → ${musicBedVol.toFixed(4)} over ${rampDuration.toFixed(2)}s` : 'no ramp (instant)',
+          musicDucksDown: voiceDelaySec > 0.1 ? `from ${musicIntroVol.toFixed(4)} → ${musicBedVol.toFixed(4)} over ${rampDuration.toFixed(2)}s` : 'no ramp (instant)',
           voiceStartsAt: `${voiceDelaySec.toFixed(2)}s`,
-          musicUnderVoice: `volume ${musicBedVol.toFixed(4)}`,
+          musicUnderVoice: `constant volume ${musicBedVol.toFixed(4)}`,
+          musicAfterVoice: `holds at ${musicBedVol.toFixed(4)} for ${HOLD_AFTER_VOICE}s then fades out`,
           totalMixDuration: `${mixDuration.toFixed(2)}s`,
           outputPath,
         });
