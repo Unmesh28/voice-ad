@@ -315,9 +315,10 @@ class FFmpegService {
 
         // Volume envelope shape — all transitions use cosine S-curves so
         // the change is gradual at start AND end (no hard corners):
-        //   1. INTRO: music at introVol (before voice)
-        //   2. DUCK: slow gradual cosine from introVol → bedVol (8s or 2 bars)
-        //   3. BED: constant bedVol throughout voiceover
+        //   1. INTRO: music at introVol (voice starts playing over it)
+        //   2. DUCK: voice plays for a moment, THEN slow gradual cosine
+        //      from introVol → bedVol (8s or 2 bars)
+        //   3. BED: constant bedVol throughout rest of voiceover
         //   4. HOLD: after voice ends, stay at bedVol — afade handles fade to silence
         //
         // Cosine ease-in-out: 0.5 - 0.5*cos(PI*(t-start)/duration)
@@ -329,33 +330,33 @@ class FFmpegService {
         // moment before the afade kicks in for a smooth fade-out.
         const HOLD_AFTER_VOICE = 2.0;
 
-        if (voiceDelaySec > 0.1) {
-          const rampStart = voiceDelaySec.toFixed(3);
-          const rampEnd = (voiceDelaySec + rampDuration).toFixed(3);
+        // How long after voice starts before the duck begins.
+        // Voice plays over full-volume music for this duration so the
+        // listener hears the voice settle in before music recedes.
+        const DUCK_DELAY_AFTER_VOICE = 1.5;
+
+        {
+          // Duck starts after voice has been playing for DUCK_DELAY_AFTER_VOICE seconds.
+          // voiceDelaySec is how long music plays alone before voice enters.
+          const duckStart = voiceDelaySec + DUCK_DELAY_AFTER_VOICE;
+          const duckEnd = duckStart + rampDuration;
+          const rampStartStr = duckStart.toFixed(3);
+          const rampEndStr = duckEnd.toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          const duckEase = cosineEase('t', rampStart, rampDuration.toFixed(3));
+          const duckEase = cosineEase('t', rampStartStr, rampDuration.toFixed(3));
           // 3-phase: intro → duck → bed (holds through voiceover and after)
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*${duckEase},${bedV}))':eval=frame`;
+          musicVolumeFilter = `volume='if(lt(t,${rampStartStr}),${introV},if(lt(t,${rampEndStr}),${introV}-(${introV}-${bedV})*${duckEase},${bedV}))':eval=frame`;
 
           logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE ===', {
             mode: 'intro_duck_bed_hold',
-            rampStart: `${rampStart}s (voice enters)`,
-            rampEnd: `${rampEnd}s (duck finishes over ${rampDuration.toFixed(1)}s)`,
+            voiceStart: `${voiceDelaySec.toFixed(3)}s`,
+            duckStart: `${rampStartStr}s (${DUCK_DELAY_AFTER_VOICE}s after voice starts)`,
+            duckEnd: `${rampEndStr}s (duck finishes over ${rampDuration.toFixed(1)}s)`,
             voiceEnd: `${voiceTotalDuration.toFixed(3)}s`,
             musicIntro: introV,
             musicBed: bedV,
-            note: 'Bed volume holds after voice ends — afade handles fade-out',
-          });
-        } else {
-          const bedV = musicBedVol.toFixed(4);
-          // No intro delay — constant bed volume, afade handles fade-out
-          musicVolumeFilter = `volume=${bedV}:eval=frame`;
-
-          logger.info('=== [STEP 4] MUSIC VOLUME (constant bed) ===', {
-            mode: 'bed_hold',
-            musicBed: bedV,
-            note: 'No voice delay — flat bed volume, afade handles fade-out',
+            note: 'Voice starts first at full music vol, then slow duck, then bed holds — afade handles fade-out',
           });
         }
 
@@ -380,10 +381,10 @@ class FFmpegService {
           `[mixraw]atrim=0:${trimDuration.toFixed(3)},asetpts=PTS-STARTPTS[mixed]`,
         );
 
-        // ── Fade-in: music emerges from silence ───────────────────
-        // 3s exp curve — mimics natural reverb tail in reverse.
-        // The ear expects exponential growth, so this sounds "natural".
-        const fadeIn = Math.max(1.5, Math.min(4.0, voiceInput.fadeIn ?? 3.0));
+        // ── Fade-in: tiny anti-click only ─────────────────────────
+        // Music starts at full intro volume immediately — no long
+        // ramp from silence. Just 50ms to prevent a digital click.
+        const fadeIn = 0.05;
 
         // ── Fade-out: starts after brief hold at bed volume ──────
         // After voice ends, music holds at bed volume for HOLD_AFTER_VOICE
@@ -399,15 +400,14 @@ class FFmpegService {
           voiceDuration: `${voiceTotalDuration}s`,
           musicDuration: `${musicDuration.toFixed(1)}s`,
           mixDuration: `${mixDuration}s`,
-          fadeIn: `${fadeIn}s (exp)`,
+          fadeIn: `${fadeIn}s (anti-click only)`,
           fadeOutStart: `${fadeOutStart.toFixed(1)}s (${HOLD_AFTER_VOICE}s after voice ends)`,
           fadeOut: `${fadeDuration.toFixed(1)}s (exp, to silence)`,
-          approach: 'intro → duck → bed → hold at bed → gradual fade-out → silence',
+          approach: 'intro (voice starts) → slow duck → bed → hold at bed → gradual fade-out → silence',
         });
 
-        // exp curve for both — mimics natural acoustic decay/growth.
-        // Far smoother than qsin or linear for long fades.
-        const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=exp`;
+        // Anti-click fade-in (linear, 50ms). Fade-out uses exp for smooth decay.
+        const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=tri`;
         if (fadeDuration > 0.5) {
           const fadeOutFilter = `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=exp`;
           filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
@@ -427,9 +427,10 @@ class FFmpegService {
         });
 
         logger.info('=== [STEP 7] MIX SUMMARY ===', {
-          musicPlaysAloneFor: voiceDelaySec > 0 ? `${voiceDelaySec.toFixed(2)}s at volume ${musicIntroVol.toFixed(4)}` : '0s (voice starts immediately)',
-          musicDucksDown: voiceDelaySec > 0.1 ? `from ${musicIntroVol.toFixed(4)} → ${musicBedVol.toFixed(4)} over ${rampDuration.toFixed(2)}s` : 'no ramp (instant)',
-          voiceStartsAt: `${voiceDelaySec.toFixed(2)}s`,
+          musicPreRoll: voiceDelaySec > 0 ? `${voiceDelaySec.toFixed(2)}s at intro volume` : 'none',
+          voiceStartsAt: `${voiceDelaySec.toFixed(2)}s (over full-volume music)`,
+          duckStartsAt: `${(voiceDelaySec + DUCK_DELAY_AFTER_VOICE).toFixed(2)}s (${DUCK_DELAY_AFTER_VOICE}s after voice)`,
+          musicDucksDown: `from ${musicIntroVol.toFixed(4)} → ${musicBedVol.toFixed(4)} over ${rampDuration.toFixed(2)}s`,
           musicUnderVoice: `constant volume ${musicBedVol.toFixed(4)}`,
           musicAfterVoice: `holds at ${musicBedVol.toFixed(4)} for ${HOLD_AFTER_VOICE}s then fades out`,
           totalMixDuration: `${mixDuration.toFixed(2)}s`,
