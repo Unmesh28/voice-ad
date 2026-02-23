@@ -819,11 +819,11 @@ class TimelineComposerService {
           const label = `${entry.type}${entry.segmentIndex}`;
           const delayMs = Math.round(entry.startTime * 1000);
 
-          // Voice entries get a smooth 1s fade-out so they don't end abruptly.
-          // Without this, the sudden voice drop makes the music feel like it "bumped up".
+          // Voice entries get a short 0.3s fade-out to prevent hard clip.
+          // Just enough to avoid a click — not long enough to eat into words.
           const isVoice = entry.type === 'voice';
-          const voiceFadeOut = isVoice && entry.duration > 1.5
-            ? `,afade=t=out:st=${Math.max(0, entry.duration - 1.0).toFixed(3)}:d=1.0:curve=qsin`
+          const voiceFadeOut = isVoice && entry.duration > 0.5
+            ? `,afade=t=out:st=${Math.max(0, entry.duration - 0.3).toFixed(3)}:d=0.3:curve=qsin`
             : '';
 
           if (delayMs > 0) {
@@ -855,15 +855,12 @@ class TimelineComposerService {
         // tail, undoing the fade. Tracks are already pre-normalized.
         filters.push('[trimmed]anull[normed]');
 
-        // Fade-out strategy:
-        //   Music stays at constant bed level throughout the voiceover.
-        //   Fade-out starts 2s BEFORE voice ends so music is already
-        //   easing down as the voice fades — no "bump" from music being
-        //   alone at full bed level. qsin curve for natural decay.
+        // Fade-out: starts at voice end. The volume envelope already eased
+        // the music down subtly in the last seconds, so this continues that
+        // trajectory smoothly to silence. qsin curve for natural decay.
         const clampedFadeIn = Math.max(0.5, Math.min(2.0, fadeIn || 1.5));
         const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
-        const FADE_OVERLAP = 2.0; // start fade before voice ends
-        const fadeOutStart = Math.max(0, lastVoiceEndTime - FADE_OVERLAP);
+        const fadeOutStart = lastVoiceEndTime;
         const fadeDuration = totalDuration - fadeOutStart;
         if (fadeDuration > 0.5) {
           filters.push(
@@ -871,7 +868,7 @@ class TimelineComposerService {
             `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin[out]`
           );
           logger.info('Music fade-out:', {
-            fadeStart: `${fadeOutStart.toFixed(1)}s (${FADE_OVERLAP}s before voice ends)`,
+            fadeStart: `${fadeOutStart.toFixed(1)}s (at voice end)`,
             fadeDuration: `${fadeDuration.toFixed(1)}s`,
             curve: 'qsin',
             trimDuration: `${trimDuration.toFixed(1)}s (includes ${FADE_PAD}s silence pad)`,

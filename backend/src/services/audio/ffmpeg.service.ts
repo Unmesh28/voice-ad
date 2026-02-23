@@ -174,10 +174,10 @@ class FFmpegService {
         const voiceDuration = await this.getAudioDuration(voiceInput.filePath);
         const voiceVol = voiceInput.volume !== undefined ? voiceInput.volume : 1.0;
 
-        // Music plays at a low, consistent volume throughout — no ducking
-        // when voice enters. The music bed stays flat under the voiceover.
-        const musicIntroVol = musicInput.volume !== undefined ? musicInput.volume : 0.10;
-        const musicBedVol = musicIntroVol; // no drop — same volume during voice
+        // Music intro plays at a higher volume, then eases smoothly into
+        // the bed level when voice enters. This creates a natural fade-in feel.
+        const musicIntroVol = musicInput.volume !== undefined ? musicInput.volume : 0.18;
+        const musicBedVol = musicIntroVol * 0.55; // bed is ~55% of intro — subtle drop
 
         logger.info('=== [STEP 2] VOLUME SETTINGS ===', {
           voiceVolumeInput: voiceInput.volume,
@@ -238,10 +238,10 @@ class FFmpegService {
         // ── Voice chain ──────────────────────────────────────────────
         // normalize → set volume → fade-in → fade-out → delay
         // Fade-in (0.5s qsin): voice emerges smoothly from the music.
-        // Fade-out (1.0s qsin): voice exits gently so there's no sudden
-        // energy drop that makes the music feel like it "bumped up".
+        // Fade-out (0.3s qsin): just enough to prevent a hard clip at
+        // the end of voice — not long enough to eat into the last words.
         const voiceEntryFade = 0.5; // seconds — smooth voice onset
-        const voiceExitFade = 1.0; // seconds — smooth voice exit
+        const voiceExitFade = 0.3; // seconds — anti-clip, not audible
         const voiceExitStart = Math.max(0, voiceDuration - voiceExitFade);
         const voiceFadeIn = `afade=t=in:st=0:d=${voiceEntryFade}:curve=qsin`;
         const voiceFadeOut = `afade=t=out:st=${voiceExitStart.toFixed(3)}:d=${voiceExitFade}:curve=qsin`;
@@ -291,44 +291,62 @@ class FFmpegService {
         const barDur = opts.barDuration ?? 0;
         const rampDuration = barDur > 0.5 ? barDur : 4.0;
 
-        // After voice ends, music stays at bed volume — no swell up.
-        // The afade handles a smooth fade-out from bed level directly.
-
-        // Cosine ease-in-out helper for FFmpeg expressions:
-        //   smoothstep(t, a, d) = 0.5 - 0.5*cos(PI*(t-a)/d)
-        // This creates a gradual S-curve: starts slow, accelerates, ends slow.
-        // Much smoother than linear ramps — no perceivable "corner" in volume.
+        // Volume envelope shape:
+        //   1. INTRO: music at introVol (afade=t=in handles emergence from silence)
+        //   2. DUCK: cosine S-curve from introVol → bedVol as voice enters
+        //   3. BED: constant bedVol throughout voiceover
+        //   4. EASE-DOWN: very subtle cosine decrease (bed → 85% bed) in last 4s
+        //      of voiceover — barely noticeable, just prepares the ear for fade
+        //   5. HOLD: stays at eased-down level; afade handles smooth fade to silence
+        //
+        // Cosine ease-in-out: 0.5 - 0.5*cos(PI*(t-start)/duration)
+        // S-curve that starts slow, accelerates, ends slow — no hard corners.
         const cosineEase = (tVar: string, start: string, dur: string) =>
           `(0.5-0.5*cos(PI*(${tVar}-${start})/${dur}))`;
+
+        // Subtle ease-down in the last 4s of voiceover
+        const EASE_DOWN_DUR = 4.0;
+        const easeDownStart = Math.max(0, voiceTotalDuration - EASE_DOWN_DUR);
+        const easeDownVol = musicBedVol * 0.85; // just 15% quieter — barely noticeable
 
         if (voiceDelaySec > 0.1) {
           const rampStart = Math.max(0, voiceDelaySec - rampDuration).toFixed(3);
           const rampEnd = voiceDelaySec.toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          // Three-phase volume envelope (afade does the fade-out):
-          // Phase 1: 0 → rampStart:             introVol (full music intro)
-          // Phase 2: rampStart → rampEnd:        introVol → bedVol (cosine ease)
-          // Phase 3: rampEnd → end:              bedVol FLAT (afade fades this out)
+          const easeV = easeDownVol.toFixed(4);
+          const easeStartStr = easeDownStart.toFixed(3);
+          const voiceEndStr = voiceTotalDuration.toFixed(3);
           const duckEase = cosineEase('t', rampStart, rampDuration.toFixed(3));
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*${duckEase},${bedV}))':eval=frame`;
+          const easeEase = cosineEase('t', easeStartStr, EASE_DOWN_DUR.toFixed(3));
+          // 5-phase: intro → duck → bed → ease-down → hold
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*${duckEase},if(lt(t,${easeStartStr}),${bedV},if(lt(t,${voiceEndStr}),${bedV}-(${bedV}-${easeV})*${easeEase},${easeV}))))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE (cosine duck, flat after voice) ===', {
-            mode: 'envelope_flat_bed',
+          logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE ===', {
+            mode: 'intro_bed_ease_hold',
             rampStart: `${rampStart}s`,
             rampEnd: `${rampEnd}s`,
+            easeDownStart: `${easeStartStr}s`,
+            voiceEnd: `${voiceEndStr}s`,
             musicIntro: introV,
             musicBed: bedV,
-            note: 'No swell — stays at bed level, afade handles fade-out',
+            easeDownVol: easeV,
+            note: 'Cosine transitions everywhere, subtle ease near end',
           });
         } else {
           const bedV = musicBedVol.toFixed(4);
-          // No intro, no swell — flat bed level throughout (afade fades)
-          musicVolumeFilter = `volume=${bedV}`;
+          const easeV = easeDownVol.toFixed(4);
+          const easeStartStr = easeDownStart.toFixed(3);
+          const voiceEndStr = voiceTotalDuration.toFixed(3);
+          const easeEase = cosineEase('t', easeStartStr, EASE_DOWN_DUR.toFixed(3));
+          // No intro delay — bed → ease-down → hold
+          musicVolumeFilter = `volume='if(lt(t,${easeStartStr}),${bedV},if(lt(t,${voiceEndStr}),${bedV}-(${bedV}-${easeV})*${easeEase},${easeV}))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed, afade fades) ===', {
-            mode: 'flat_bed',
+          logger.info('=== [STEP 4] MUSIC VOLUME (bed → ease → hold) ===', {
+            mode: 'bed_ease_hold',
             musicBed: bedV,
+            easeDownVol: easeV,
+            easeDownStart: `${easeStartStr}s`,
           });
         }
 
@@ -353,15 +371,13 @@ class FFmpegService {
           `[mixraw]atrim=0:${trimDuration.toFixed(3)},asetpts=PTS-STARTPTS[mixed]`,
         );
 
-        // Music stays flat at bed level during voice. The fade-out starts
-        // 2s BEFORE voice ends so the music is already gently easing down
-        // as the voice fades out — no moment where "music alone at bed level"
-        // is audible (which sounds like a bump). The overlap creates a
-        // seamless transition: voice fading out + music fading out together.
+        // Smooth fade-in (1.5s) so the mix emerges gently from silence.
+        // Fade-out starts at voice end — the volume envelope already eased
+        // the music down subtly in the last 4s, so the afade continues
+        // that trajectory smoothly into silence. qsin curve for natural decay.
         const fadeIn = Math.max(0.5, Math.min(2.0, voiceInput.fadeIn ?? 1.5));
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'tri';
-        const FADE_OVERLAP = 2.0; // start music fade before voice ends
-        const fadeOutStart = Math.max(0, voiceTotalDuration - FADE_OVERLAP);
+        const fadeOutStart = voiceTotalDuration;
         const fadeDuration = mixDuration - fadeOutStart;
 
         logger.info('Professional mix settings:', {
@@ -374,7 +390,7 @@ class FFmpegService {
           mixDuration: `${mixDuration}s`,
           fadeIn: `${fadeIn}s`,
           fadeOut: `${fadeDuration.toFixed(1)}s (qsin, from ${fadeOutStart.toFixed(3)}s)`,
-          approach: 'flat bed + qsin afade from voice end',
+          approach: 'intro → bed → subtle ease → qsin fade-out',
         });
 
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;
