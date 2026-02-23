@@ -288,12 +288,8 @@ class FFmpegService {
         const barDur = opts.barDuration ?? 0;
         const rampDuration = barDur > 0.5 ? barDur : 4.0;
 
-        // Outro: after voice ends, music swells gently then holds FLAT.
-        // Subtle lift (1.5x) over 4s so the transition is barely noticeable.
-        // afade handles the actual smooth fade-out (no double-fade).
-        const outroVol = Math.min(Math.max(musicIntroVol * 1.5, 0.15), 0.25);
-        const outroSwellEnd = voiceTotalDuration + 4.0; // 4s gentle swell
-        const outroSwellEndStr = outroSwellEnd.toFixed(3);
+        // After voice ends, music stays at bed volume — no swell up.
+        // The afade handles a smooth fade-out from bed level directly.
 
         // Cosine ease-in-out helper for FFmpeg expressions:
         //   smoothstep(t, a, d) = 0.5 - 0.5*cos(PI*(t-a)/d)
@@ -307,43 +303,29 @@ class FFmpegService {
           const rampEnd = voiceDelaySec.toFixed(3);
           const introV = musicIntroVol.toFixed(4);
           const bedV = musicBedVol.toFixed(4);
-          const outV = outroVol.toFixed(4);
-          // Five-phase volume envelope (afade does the fade-out):
+          // Three-phase volume envelope (afade does the fade-out):
           // Phase 1: 0 → rampStart:             introVol (full music intro)
           // Phase 2: rampStart → rampEnd:        introVol → bedVol (cosine ease)
-          // Phase 3: rampEnd → voiceTotalDur:    bedVol (under voice)
-          // Phase 4: voiceTotalDur → swellEnd:   bedVol → outroVol (cosine ease)
-          // Phase 5: swellEnd → end:             outroVol FLAT (afade fades this)
-          const voiceEndStr = voiceTotalDuration.toFixed(3);
-          const swellDur = '4.0';
+          // Phase 3: rampEnd → end:              bedVol FLAT (afade fades this out)
           const duckEase = cosineEase('t', rampStart, rampDuration.toFixed(3));
-          const swellEase = cosineEase('t', voiceEndStr, swellDur);
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*${duckEase},if(lt(t,${voiceEndStr}),${bedV},if(lt(t,${outroSwellEndStr}),${bedV}+(${outV}-${bedV})*${swellEase},${outV}))))':eval=frame`;
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*${duckEase},${bedV}))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE (cosine ramps, afade fades) ===', {
-            mode: 'envelope_cosine',
+          logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE (cosine duck, flat after voice) ===', {
+            mode: 'envelope_flat_bed',
             rampStart: `${rampStart}s`,
             rampEnd: `${rampEnd}s`,
-            voiceEnd: `${voiceEndStr}s`,
-            swellEnd: `${outroSwellEndStr}s (music peaks at ${outV}, stays flat)`,
             musicIntro: introV,
             musicBed: bedV,
-            musicOutro: outV,
+            note: 'No swell — stays at bed level, afade handles fade-out',
           });
         } else {
           const bedV = musicBedVol.toFixed(4);
-          const outV = outroVol.toFixed(4);
-          const voiceEndStr = voiceTotalDuration.toFixed(3);
-          const swellDur = '4.0';
-          const swellEase = cosineEase('t', voiceEndStr, swellDur);
-          // No intro ramp — bed → cosine swell → flat (afade fades)
-          musicVolumeFilter = `volume='if(lt(t,${voiceEndStr}),${bedV},if(lt(t,${outroSwellEndStr}),${bedV}+(${outV}-${bedV})*${swellEase},${outV}))':eval=frame`;
+          // No intro, no swell — flat bed level throughout (afade fades)
+          musicVolumeFilter = `volume=${bedV}`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed → cosine swell → flat for afade) ===', {
-            mode: 'cosine_swell',
+          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed, afade fades) ===', {
+            mode: 'flat_bed',
             musicBed: bedV,
-            musicOutro: outV,
-            swellEnd: `${outroSwellEndStr}s`,
           });
         }
 
@@ -368,32 +350,31 @@ class FFmpegService {
           `[mixraw]atrim=0:${trimDuration.toFixed(3)},asetpts=PTS-STARTPTS[mixed]`,
         );
 
-        // Volume envelope holds music FLAT at peak after the swell.
-        // A single afade handles the smooth fade-out starting from
-        // swell peak — 'qsin' curve: guaranteed to reach exactly zero,
-        // natural perceived decay, no click at trim point.
-        // Smooth 1.5s fade-in so the entire mix emerges gently from silence
+        // Music stays flat at bed level after voice. afade handles the
+        // smooth fade-out starting from voice end — 'qsin' curve for a
+        // natural perceived decay, guaranteed to reach exactly zero.
+        // Smooth 1.5s fade-in so the entire mix emerges gently from silence.
         const fadeIn = Math.max(0.5, Math.min(2.0, voiceInput.fadeIn ?? 1.5));
         const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'tri';
-        const fadeDuration = mixDuration - outroSwellEnd;
+        const fadeOutStart = voiceTotalDuration;
+        const fadeDuration = mixDuration - fadeOutStart;
 
         logger.info('Professional mix settings:', {
           voiceVol,
           musicIntroVol: musicIntroVol.toFixed(3),
           musicBedVol: musicBedVol.toFixed(3),
-          outroVol: outroVol.toFixed(3),
           voiceDelay: `${voiceDelaySec}s`,
           voiceDuration: `${voiceTotalDuration}s`,
           musicDuration: `${musicDuration.toFixed(1)}s`,
           mixDuration: `${mixDuration}s`,
           fadeIn: `${fadeIn}s`,
-          fadeOut: `${fadeDuration.toFixed(1)}s (qsin, from ${outroSwellEndStr}s)`,
-          approach: 'flat envelope + single qsin afade',
+          fadeOut: `${fadeDuration.toFixed(1)}s (qsin, from ${fadeOutStart.toFixed(3)}s)`,
+          approach: 'flat bed + qsin afade from voice end',
         });
 
         const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;
         if (fadeDuration > 0.5) {
-          const fadeOutFilter = `afade=t=out:st=${outroSwellEndStr}:d=${fadeDuration.toFixed(3)}:curve=qsin`;
+          const fadeOutFilter = `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin`;
           filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
         } else {
           filters.push(`[mixed]${fadeInFilter}[faded]`);
