@@ -92,7 +92,7 @@ const MusicGenerator = () => {
   };
 
   const getAudioUrl = (fileUrl: string) => {
-    return `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000'}${fileUrl}`;
+    return `${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5011'}${fileUrl}`;
   };
 
   return (

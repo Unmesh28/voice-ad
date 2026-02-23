@@ -19,14 +19,14 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0', // Listen on all network interfaces
-    port: 3000,
+    port: 3011,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://localhost:5011',
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://localhost:5000',
+        target: 'http://localhost:5011',
         changeOrigin: true,
       },
     },

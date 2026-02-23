@@ -8,8 +8,8 @@ const path = require('path');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
-const PORT = process.env.FRONTEND_PORT || 3000;
-const BACKEND_URL = 'http://localhost:5000';
+const PORT = process.env.FRONTEND_PORT || 3011;
+const BACKEND_URL = 'http://localhost:5011';
 
 // API Proxy - Forward all /api requests to backend
 app.use('/api', createProxyMiddleware({
