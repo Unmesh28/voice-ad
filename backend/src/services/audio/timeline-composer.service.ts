@@ -160,10 +160,10 @@ class TimelineComposerService {
       baseMusicVolume
     );
 
-    // 1b. Apply energy arc modeling to the music volume envelope.
-    //     This modulates volumes based on the ad's narrative arc,
-    //     creating a natural "breathing" quality that follows the story.
-    this.computeEnergyArc(segments, musicVolumeSegments);
+    // 1b. Energy arc modeling DISABLED.
+    //     Dynamic volume modulation during the voiceover causes audible
+    //     bumps. Music should stay at a constant bed level throughout.
+    // this.computeEnergyArc(segments, musicVolumeSegments);
 
     logger.info('Timeline computed', {
       entries: timeline.length,
@@ -382,25 +382,10 @@ class TimelineComposerService {
           case 'crossfade': {
             // Overlap: pull the next segment back by transitionDur.
             // Both segments play simultaneously during the overlap region.
-            // Music crossfades between the two segments' volumes.
+            // Music stays at constant bed level — no volume ramp needed.
             const overlap = Math.min(transitionDur, seg.duration * 0.5);
             if (overlap > 0.05) {
               cursor = segEnd - overlap;
-
-              // Add a transition music volume ramp during the overlap
-              const nextMusicBehavior = nextSeg.music?.behavior ?? 'none';
-              const nextMusicVol = this.resolveMusicVolume(nextMusicBehavior, nextSeg.music?.volume, baseMusicVolume);
-              const midVol = (musicVolForSegment + nextMusicVol) / 2;
-
-              // Shorten the current music segment and add a ramp region
-              musicVolumeSegments[musicVolumeSegments.length - 1].endTime = segEnd - overlap;
-              musicVolumeSegments.push({
-                startTime: segEnd - overlap,
-                endTime: segEnd,
-                volume: midVol,
-                behavior: 'resolving', // Use resolving for smooth ramp
-              });
-
               logger.debug(`Transition: crossfade ${overlap.toFixed(2)}s between "${seg.label}" → "${nextSeg.label}"`);
             } else {
               cursor = segEnd;
@@ -537,34 +522,19 @@ class TimelineComposerService {
   /**
    * Resolve the actual music volume for a segment based on its behavior.
    *
-   * Key design rule: music volume stays flat — no ducking during voiceover.
-   * The music starts at a low, consistent level and does not drop when
-   * voice enters. This keeps the mix clean without volume pumping.
+   * Key design rule: music volume stays CONSTANT throughout the entire ad.
+   * Every behavior (full, ducked, building, accent, resolving) returns the
+   * same bed level. This eliminates all volume bumps between segments.
+   * The only exception is 'none' which mutes music entirely.
    */
   private resolveMusicVolume(
     behavior: MusicBehavior,
-    segmentVolume: number | undefined,
-    baseMusicVolume: number
+    _segmentVolume: number | undefined,
+    _baseMusicVolume: number
   ): number {
-    switch (behavior) {
-      case 'full':
-        // Full music: use explicit volume if given, otherwise moderate presence
-        return segmentVolume !== undefined ? Math.max(segmentVolume, 0.20) : 0.35;
-      case 'ducked':
-        // No ducking — keep music at the same level as full.
-        // Voice clarity is achieved by starting music low, not by dipping it.
-        return 0.35;
-      case 'building':
-        return segmentVolume !== undefined ? segmentVolume : baseMusicVolume * 2.0;
-      case 'resolving':
-        return segmentVolume !== undefined ? segmentVolume : baseMusicVolume * 1.1;
-      case 'accent':
-        return segmentVolume !== undefined ? segmentVolume : 0.6;
-      case 'none':
-        return 0.0;
-      default:
-        return segmentVolume !== undefined ? segmentVolume : baseMusicVolume;
-    }
+    if (behavior === 'none') return 0.0;
+    // Constant bed level for ALL behaviors — no volume changes between segments.
+    return 0.35;
   }
 
   // -------------------------------------------------------------------------
@@ -849,13 +819,20 @@ class TimelineComposerService {
           const label = `${entry.type}${entry.segmentIndex}`;
           const delayMs = Math.round(entry.startTime * 1000);
 
+          // Voice entries get a smooth 1s fade-out so they don't end abruptly.
+          // Without this, the sudden voice drop makes the music feel like it "bumped up".
+          const isVoice = entry.type === 'voice';
+          const voiceFadeOut = isVoice && entry.duration > 1.5
+            ? `,afade=t=out:st=${Math.max(0, entry.duration - 1.0).toFixed(3)}:d=1.0:curve=qsin`
+            : '';
+
           if (delayMs > 0) {
             filters.push(
-              `[${inputIdx}:a]${NORMALIZE_FILTER},volume=${entry.volume},adelay=${delayMs}|${delayMs}[${label}]`
+              `[${inputIdx}:a]${NORMALIZE_FILTER},volume=${entry.volume}${voiceFadeOut},adelay=${delayMs}|${delayMs}[${label}]`
             );
           } else {
             filters.push(
-              `[${inputIdx}:a]${NORMALIZE_FILTER},volume=${entry.volume}[${label}]`
+              `[${inputIdx}:a]${NORMALIZE_FILTER},volume=${entry.volume}${voiceFadeOut}[${label}]`
             );
           }
 
@@ -879,24 +856,22 @@ class TimelineComposerService {
         filters.push('[trimmed]anull[normed]');
 
         // Fade-out strategy:
-        //   Volume envelope holds music FLAT at peak during the tail.
-        //   A SINGLE afade handles the smooth fade-out starting after
-        //   the swell peak. No double-fade, no discrete steps.
-        //
-        //   'qsin' (quarter-sine) is guaranteed to reach EXACTLY zero
-        //   at the end — no residual signal, no click at the trim point.
-        //   Perceived as natural: gentle initial decay, accelerating.
-        // Smooth 1.5s fade-in so the mix gently emerges from silence
+        //   Music stays at constant bed level throughout the voiceover.
+        //   Fade-out starts 2s BEFORE voice ends so music is already
+        //   easing down as the voice fades — no "bump" from music being
+        //   alone at full bed level. qsin curve for natural decay.
         const clampedFadeIn = Math.max(0.5, Math.min(2.0, fadeIn || 1.5));
         const ffmpegCurve = fadeCurve === 'linear' ? 'tri' : fadeCurve === 'qsin' ? 'qsin' : 'exp';
-        const fadeDuration = totalDuration - swellEndTime;
+        const FADE_OVERLAP = 2.0; // start fade before voice ends
+        const fadeOutStart = Math.max(0, lastVoiceEndTime - FADE_OVERLAP);
+        const fadeDuration = totalDuration - fadeOutStart;
         if (fadeDuration > 0.5) {
           filters.push(
             `[normed]afade=t=in:st=0:d=${clampedFadeIn}:curve=${ffmpegCurve},` +
-            `afade=t=out:st=${swellEndTime.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin[out]`
+            `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin[out]`
           );
           logger.info('Music fade-out:', {
-            fadeStart: `${swellEndTime.toFixed(1)}s (after swell peak)`,
+            fadeStart: `${fadeOutStart.toFixed(1)}s (${FADE_OVERLAP}s before voice ends)`,
             fadeDuration: `${fadeDuration.toFixed(1)}s`,
             curve: 'qsin',
             trimDuration: `${trimDuration.toFixed(1)}s (includes ${FADE_PAD}s silence pad)`,
