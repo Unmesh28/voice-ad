@@ -105,9 +105,9 @@ const SAMPLE_RATE = 48000;
 const NORMALIZE_FILTER = `aformat=channel_layouts=stereo,aresample=${SAMPLE_RATE}`;
 
 /** Volume ramp duration at music segment boundaries.
- *  0.5s gives a smooth, gradual transition between volume levels.
- *  (Was 0.08s which felt like a hard cut.) */
-const VOLUME_RAMP_SEC = 0.5;
+ *  1.5s gives a very smooth, gradual transition between volume levels.
+ *  Combined with cosine easing for imperceptible volume changes. */
+const VOLUME_RAMP_SEC = 1.5;
 
 // ---------------------------------------------------------------------------
 // Service
