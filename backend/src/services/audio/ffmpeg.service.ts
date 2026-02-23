@@ -211,8 +211,8 @@ class FFmpegService {
         }
 
         // Mix duration: voice plays fully, then music tail for smooth fade-out.
-        // 10s gives a long, cinematic fade — music breathes and decays naturally.
-        const MUSIC_TAIL = 10.0;
+        // 14s gives a long, cinematic tail — music rises back and THEN fades.
+        const MUSIC_TAIL = 14.0;
         let mixDuration = voiceTotalDuration + MUSIC_TAIL;
 
         // Enforce maxDuration: the tail must fit WITHIN the slot.
@@ -402,20 +402,25 @@ class FFmpegService {
           `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
         );
 
-        // Trim with pad — fade reaches zero before the trim point
-        const FADE_PAD = 0.15;
+        // Trim with pad — exp fade needs extra room to reach true silence
+        const FADE_PAD = 0.5;
         const trimDuration = mixDuration + FADE_PAD;
         filters.push(
           `[mixraw]atrim=0:${trimDuration.toFixed(3)},asetpts=PTS-STARTPTS[mixed]`,
         );
 
-        // Smooth fade-in (2.5s) so the mix emerges very gradually from silence.
-        // Fade-out starts after rise-back — the music has already risen back
-        // to intro level, so the qsin fade-out decays naturally from there.
-        const fadeIn = Math.max(1.0, Math.min(3.5, voiceInput.fadeIn ?? 2.5));
-        const curveParam = fadeCurve ? this.fadeCurveToFFmpeg(fadeCurve) : 'qsin';
-        const fadeOutStart = voiceTotalDuration;
-        const fadeDuration = mixDuration - fadeOutStart;
+        // ── Fade-in: music emerges from silence ───────────────────
+        // 3s exp curve — mimics natural reverb tail in reverse.
+        // The ear expects exponential growth, so this sounds "natural".
+        const fadeIn = Math.max(1.5, Math.min(4.0, voiceInput.fadeIn ?? 3.0));
+
+        // ── Fade-out: starts AFTER music has risen back ──────────
+        // The rise-back takes RISE_BACK_DUR (6s) after voice ends.
+        // We start the fade 2s before rise-back finishes so they
+        // overlap slightly — the rise slows to a stop while the
+        // fade gently takes over. No sudden "peak then drop".
+        const fadeOutStart = riseBackEnd - 2.0;
+        const fadeDuration = Math.max(2.0, mixDuration - fadeOutStart);
 
         logger.info('Professional mix settings:', {
           voiceVol,
@@ -425,14 +430,17 @@ class FFmpegService {
           voiceDuration: `${voiceTotalDuration}s`,
           musicDuration: `${musicDuration.toFixed(1)}s`,
           mixDuration: `${mixDuration}s`,
-          fadeIn: `${fadeIn}s`,
-          fadeOut: `${fadeDuration.toFixed(1)}s (qsin, from ${fadeOutStart.toFixed(3)}s)`,
-          approach: 'intro → bed → subtle ease → qsin fade-out',
+          fadeIn: `${fadeIn}s (exp)`,
+          fadeOutStart: `${fadeOutStart.toFixed(1)}s (2s before rise-back ends)`,
+          fadeOut: `${fadeDuration.toFixed(1)}s (exp, to silence)`,
+          approach: 'intro → bed → ease → rise-back → overlap-fade → silence',
         });
 
-        const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=${curveParam}`;
+        // exp curve for both — mimics natural acoustic decay/growth.
+        // Far smoother than qsin or linear for long fades.
+        const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=exp`;
         if (fadeDuration > 0.5) {
-          const fadeOutFilter = `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin`;
+          const fadeOutFilter = `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=exp`;
           filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
         } else {
           filters.push(`[mixed]${fadeInFilter}[faded]`);
@@ -1375,7 +1383,7 @@ class FFmpegService {
     inputPath: string,
     outputPath: string,
     targetDuration: number,
-    fadeOutDuration: number = 3.0
+    fadeOutDuration: number = 5.0
   ): Promise<string> {
     const currentDuration = await this.getAudioDuration(inputPath);
 
@@ -1389,13 +1397,13 @@ class FFmpegService {
         const command = ffmpeg(inputPath);
 
         if (currentDuration > targetDuration) {
-          // Trim with smooth fade-out at the end.
-          // Use 'tri' (linear) — 'exp' drops to near-silence instantly.
+          // Trim with ultra-smooth fade-out at the end.
+          // qsin curve for natural decay — exp is too aggressive for short fades.
           const fadeStart = Math.max(0, targetDuration - fadeOutDuration);
           command.audioFilters([
             `atrim=0:${targetDuration}`,
             'asetpts=PTS-STARTPTS',
-            `afade=t=out:st=${fadeStart}:d=${fadeOutDuration}:curve=tri`,
+            `afade=t=out:st=${fadeStart}:d=${fadeOutDuration}:curve=qsin`,
           ].join(','));
         } else {
           // Pad with silence to reach target duration
