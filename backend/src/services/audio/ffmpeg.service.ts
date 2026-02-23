@@ -187,10 +187,10 @@ class FFmpegService {
           note: 'Constant music volume — no ducking, no intro/bed difference',
         });
 
-        // Voice delay: when blueprint alignment says voice should enter on a
-        // downbeat, we pad silence before the voice so it starts at the right
-        // musical moment. The delay is in seconds on the voice stream.
-        const voiceDelaySec = voiceInput.delay ?? 0;
+        // Voice delay: voice enters after a music intro so listeners hear
+        // the music establish itself before the voiceover begins.
+        // Minimum 1.5s ensures a smooth, audible music fade-in.
+        const voiceDelaySec = Math.max(1.5, voiceInput.delay ?? 0);
 
         // Get durations so we can compute mix length and detect music shortfall.
         const musicDuration = await this.getAudioDuration(musicInput.filePath);
@@ -244,18 +244,17 @@ class FFmpegService {
         // 4. compressor: gentle peak-catching only (-3 dB threshold, 1.5:1)
         //    — slow release (200ms) prevents audible "breathing" / pumping
         // 5. stereotools: very subtle stereo width (mlev=0.02)
-        // 6. aecho: hint of room ambience so voice doesn't sound "flat"
         //
-        // NOTE: No loudnorm here. Single-pass loudnorm dynamically boosts
-        // quiet sections (pauses between words) and reduces loud parts,
-        // causing the music to appear to "pump" up and down when mixed.
+        // NOTE: No loudnorm — it dynamically boosts quiet pauses between
+        // words, causing music to appear to "pump" up and down when mixed.
+        // NOTE: No aecho — reverb tails leak into word gaps and create
+        // perceived volume fluctuations against the constant music bed.
         const vocalProcessing = [
           'highpass=f=80',
           'equalizer=f=120:w=200:g=-3',
           'equalizer=f=3500:w=2000:g=3',
           'acompressor=threshold=-3dB:ratio=1.5:attack=10:release=200:makeup=1',
           'stereotools=mlev=0.02',
-          'aecho=0.8:0.9:25:0.15',
         ].join(',');
 
         // Fade-in (1.2s qsin): voice emerges very gradually from the music
@@ -273,7 +272,7 @@ class FFmpegService {
 
         logger.info('=== [STEP 5] VOICE CHAIN ===', {
           voiceVolume: voiceVol,
-          vocalProcessing: 'highpass→EQ→compressor→stereo→echo→loudnorm',
+          vocalProcessing: 'highpass→EQ→compressor→stereo',
           voiceEntryFade: `${voiceEntryFade}s (qsin)`,
           voiceExitFade: `${voiceExitFade}s (qsin, starts at ${voiceExitStart.toFixed(3)}s)`,
           voiceDelay: voiceDelaySec > 0 ? `${voiceDelaySec.toFixed(2)}s (${Math.round(voiceDelaySec * 1000)}ms)` : 'none',
@@ -286,13 +285,18 @@ class FFmpegService {
         ];
 
         // ── Music chain ─────────────────────────────────────────────
-        // Music plays at introVol during the intro, then when voice
-        // enters the duck starts simultaneously — voice masks the
-        // gradual cosine transition from intro → bed. No silent drop.
-        // When music is shorter than mixDuration, LOOP the music instead
-        // of padding with silence. apad adds silence which makes the
-        // outro tail completely inaudible. aloop replays the actual
-        // music so the fade-out has real content.
+        // Music volume follows a DETERMINISTIC envelope — no dynamic
+        // processing that could cause "pumping". The envelope is built
+        // from known timing (voiceDelaySec, voiceDuration) so there are
+        // ZERO volume surprises during the mix.
+        //
+        // Timeline:
+        //   0 ─── fadeInEnd ─── voiceStart ─── voiceStart+ramp ─── voiceEnd ─── end
+        //   │  fade-in 0→full  │ brief hold │  gradual duck     │ constant   │ fade-out
+        //   │  (smooth)        │ at full    │  full → 85%       │ at 85%     │ 85% → 0
+        //
+        // When music is shorter than mixDuration, LOOP the music so
+        // the fade-out has real content (not silence).
         let musicPad = '';
         if (musicDuration < mixDuration) {
           const loopsNeeded = Math.ceil(mixDuration / musicDuration);
@@ -306,18 +310,62 @@ class FFmpegService {
           });
         }
 
-        // Constant volume — no ducking, no volume automation.
-        // Voice clarity comes from level difference + EQ, not volume changes.
-        const musicVolumeFilter = `volume=${musicVol.toFixed(4)}`;
+        // ── Music volume envelope (all times in seconds) ──────────
+        const musicFadeInDur = Math.min(voiceDelaySec, 1.5);   // Smooth fade-in over intro
+        const duckRampDur = 0.8;                                 // How long the duck transition takes
+        const duckLevel = 0.85;                                  // 85% = 15% volume reduction during voice
+        const voiceEndTime = voiceTotalDuration;                 // When voice finishes
+        const fadeOutDur = Math.max(2.0, mixDuration - voiceEndTime); // Smooth fade to silence
+        const fadeOutEnd = voiceEndTime + fadeOutDur;
 
-        logger.info('=== [STEP 4] MUSIC VOLUME ===', {
+        // FFmpeg volume expression evaluated per-frame using timestamp 't'.
+        // Uses nested if() for the 5 phases. All transitions are linear
+        // ramps (no sudden jumps). The final multiplied by musicVol scales
+        // everything to the configured music level.
+        //
+        // Phase 1: t < fadeInEnd         → fade in:  0 → 1.0 (linear ramp)
+        // Phase 2: fadeInEnd ≤ t < voiceStart  → full volume: 1.0
+        // Phase 3: voiceStart ≤ t < voiceStart+ramp → duck: 1.0 → duckLevel
+        // Phase 4: voiceStart+ramp ≤ t < voiceEnd → constant duck: duckLevel
+        // Phase 5: t ≥ voiceEnd          → fade out: duckLevel → 0
+        const V = musicVol.toFixed(4);
+        const D = duckLevel.toFixed(4);
+        const FI = musicFadeInDur.toFixed(4);
+        const VS = voiceDelaySec.toFixed(4);
+        const VSR = (voiceDelaySec + duckRampDur).toFixed(4);
+        const VE = voiceEndTime.toFixed(4);
+        const FO = fadeOutDur.toFixed(4);
+
+        // Build the expression — each line is one phase
+        const volExpr = [
+          `if(lt(t,${FI}),`,                                                    // Phase 1: fade-in
+          `  ${V}*(t/${FI}),`,                                                   //   0 → musicVol
+          `if(lt(t,${VS}),`,                                                     // Phase 2: full volume hold
+          `  ${V},`,                                                             //   musicVol
+          `if(lt(t,${VSR}),`,                                                    // Phase 3: duck ramp
+          `  ${V}*(1.0-(1.0-${D})*(t-${VS})/${duckRampDur.toFixed(4)}),`,       //   musicVol → musicVol*duckLevel
+          `if(lt(t,${VE}),`,                                                     // Phase 4: constant duck
+          `  ${V}*${D},`,                                                        //   musicVol*duckLevel
+          `  ${V}*${D}*max(0,(1.0-(t-${VE})/${FO}))`,                           // Phase 5: fade-out
+          `))))`,
+        ].join('');
+
+        const musicVolumeFilter = `volume='${volExpr}':eval=frame`;
+
+        logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE ===', {
           musicVol: musicVol.toFixed(4),
-          note: 'Flat constant volume — no duck, no intro/bed ramp',
+          musicFadeInDur: `${musicFadeInDur.toFixed(2)}s`,
+          duckRampDur: `${duckRampDur}s`,
+          duckLevel: `${(duckLevel * 100).toFixed(0)}% (${((1 - duckLevel) * 100).toFixed(0)}% reduction)`,
+          voiceStart: `${voiceDelaySec.toFixed(2)}s`,
+          voiceEnd: `${voiceEndTime.toFixed(2)}s`,
+          fadeOutDur: `${fadeOutDur.toFixed(2)}s`,
+          envelope: `fade-in(${musicFadeInDur.toFixed(1)}s) → full → duck(${duckRampDur}s) → constant ${(duckLevel * 100).toFixed(0)}% → fade-out(${fadeOutDur.toFixed(1)}s)`,
         });
 
         // Loop music FIRST (so it covers the full mixDuration), THEN apply
         // the volume envelope. If volume is applied before loop, the looped
-        // section would repeat the intro→bed→outro ramp incorrectly.
+        // section would repeat the envelope incorrectly.
         filters.push(
           `[1:a]${normalizeSync}${musicPad},${musicVolumeFilter}[mduck]`,
         );
@@ -329,24 +377,12 @@ class FFmpegService {
           `[vmix][mduck]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[mixraw]`,
         );
 
-        // Trim with pad — exp fade needs extra room to reach true silence
+        // Trim to final length (small pad for the fade-out tail to fully decay)
         const FADE_PAD = 0.5;
-        const trimDuration = mixDuration + FADE_PAD;
+        const trimDuration = Math.min(fadeOutEnd + FADE_PAD, mixDuration + FADE_PAD);
         filters.push(
           `[mixraw]atrim=0:${trimDuration.toFixed(3)},asetpts=PTS-STARTPTS[mixed]`,
         );
-
-        // ── Fade-in: tiny anti-click only ─────────────────────────
-        // Music starts at full intro volume immediately — no long
-        // ramp from silence. Just 50ms to prevent a digital click.
-        const fadeIn = 0.05;
-
-        // ── Fade-out: starts immediately when voice ends ──────
-        // No hold — fading right away prevents the "music gets louder"
-        // effect caused by psychoacoustic masking (voice was hiding the
-        // music, and when voice stops, same-level music sounds louder).
-        const fadeOutStart = voiceTotalDuration;
-        const fadeDuration = Math.max(2.0, mixDuration - fadeOutStart);
 
         logger.info('Professional mix settings:', {
           voiceVol,
@@ -355,24 +391,17 @@ class FFmpegService {
           voiceDuration: `${voiceTotalDuration}s`,
           musicDuration: `${musicDuration.toFixed(1)}s`,
           mixDuration: `${mixDuration}s`,
-          fadeIn: `${fadeIn}s (anti-click only)`,
-          fadeOutStart: `${fadeOutStart.toFixed(1)}s (immediately at voice end)`,
-          fadeOut: `${fadeDuration.toFixed(1)}s (qsin, smooth to silence)`,
-          approach: 'constant music vol → voice over it → voice ends → immediate smooth fade-out',
+          musicEnvelope: `fade-in ${musicFadeInDur.toFixed(1)}s → duck to ${(duckLevel * 100).toFixed(0)}% over ${duckRampDur}s → hold → fade-out ${fadeOutDur.toFixed(1)}s`,
+          approach: 'deterministic volume envelope on music — zero dynamic processing',
         });
 
-        // Anti-click fade-in (linear, 50ms). Fade-out uses qsin (quarter sine)
-        // for the smoothest perceptual decay — unlike exp which drops fast at
-        // the start, qsin eases out very gradually then accelerates to silence.
-        const fadeInFilter = `afade=t=in:st=0:d=${fadeIn}:curve=tri`;
-        if (fadeDuration > 0.5) {
-          const fadeOutFilter = `afade=t=out:st=${fadeOutStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}:curve=qsin`;
-          filters.push(`[mixed]${fadeInFilter},${fadeOutFilter}[faded]`);
-        } else {
-          filters.push(`[mixed]${fadeInFilter}[faded]`);
-        }
+        // No mix-level fade-in/fade-out needed — the music envelope
+        // already handles smooth fade-in from silence and fade-out to silence.
+        // Just a tiny 10ms anti-click on the combined signal.
+        const antiClick = `afade=t=in:st=0:d=0.01:curve=tri`;
+        filters.push(`[mixed]${antiClick}[faded]`);
 
-        // No loudnorm — inputs are pre-normalized, loudnorm fights the fade.
+        // No loudnorm — inputs are pre-normalized, loudnorm fights the envelope.
         filters.push('[faded]anull[out]');
 
         const filterStr = filters.join(';');
@@ -384,10 +413,10 @@ class FFmpegService {
         });
 
         logger.info('=== [STEP 7] MIX SUMMARY ===', {
-          musicPreRoll: voiceDelaySec > 0 ? `${voiceDelaySec.toFixed(2)}s before voice` : 'none',
+          musicPreRoll: `${voiceDelaySec.toFixed(2)}s fade-in before voice`,
           voiceStartsAt: `${voiceDelaySec.toFixed(2)}s`,
-          musicVolume: `constant ${musicVol.toFixed(4)} throughout`,
-          fadeOutAt: `${voiceTotalDuration.toFixed(2)}s (voice end) → silence over ${fadeDuration.toFixed(1)}s`,
+          musicVolume: `${musicVol.toFixed(4)} full → ${(musicVol * duckLevel).toFixed(4)} ducked (${(duckLevel * 100).toFixed(0)}%)`,
+          fadeOutAt: `${voiceEndTime.toFixed(2)}s (voice end) → silence over ${fadeOutDur.toFixed(1)}s`,
           totalMixDuration: `${mixDuration.toFixed(2)}s`,
           outputPath,
         });
