@@ -237,12 +237,12 @@ class FFmpegService {
 
         // ── Voice chain ──────────────────────────────────────────────
         // normalize → set volume → fade-in → delay
-        // The fade-in (0.15s) is applied to the voice audio BEFORE the
+        // The fade-in (0.5s) is applied to the voice audio BEFORE the
         // delay so that when the voice enters the mix it ramps up from
-        // silence rather than appearing as a hard cut. This lets the
-        // voice "emerge from" the music naturally — a true crossfade.
-        const voiceEntryFade = 0.15; // seconds — smooth voice onset
-        const voiceFade = `afade=t=in:st=0:d=${voiceEntryFade}:curve=tri`;
+        // silence smoothly. The qsin curve starts gentle and accelerates,
+        // making the voice "emerge from" the music naturally.
+        const voiceEntryFade = 0.5; // seconds — smooth voice onset
+        const voiceFade = `afade=t=in:st=0:d=${voiceEntryFade}:curve=qsin`;
         const voiceBase = voiceDelaySec > 0
           ? `[0:a]${normalizeSync},volume=${voiceVol},${voiceFade},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
           : `[0:a]${normalizeSync},volume=${voiceVol},${voiceFade}`;
@@ -295,6 +295,13 @@ class FFmpegService {
         const outroSwellEnd = voiceTotalDuration + 4.0; // 4s gentle swell
         const outroSwellEndStr = outroSwellEnd.toFixed(3);
 
+        // Cosine ease-in-out helper for FFmpeg expressions:
+        //   smoothstep(t, a, d) = 0.5 - 0.5*cos(PI*(t-a)/d)
+        // This creates a gradual S-curve: starts slow, accelerates, ends slow.
+        // Much smoother than linear ramps — no perceivable "corner" in volume.
+        const cosineEase = (tVar: string, start: string, dur: string) =>
+          `(0.5-0.5*cos(PI*(${tVar}-${start})/${dur}))`;
+
         if (voiceDelaySec > 0.1) {
           const rampStart = Math.max(0, voiceDelaySec - rampDuration).toFixed(3);
           const rampEnd = voiceDelaySec.toFixed(3);
@@ -303,15 +310,18 @@ class FFmpegService {
           const outV = outroVol.toFixed(4);
           // Five-phase volume envelope (afade does the fade-out):
           // Phase 1: 0 → rampStart:             introVol (full music intro)
-          // Phase 2: rampStart → rampEnd:        introVol → bedVol (duck for voice)
+          // Phase 2: rampStart → rampEnd:        introVol → bedVol (cosine ease)
           // Phase 3: rampEnd → voiceTotalDur:    bedVol (under voice)
-          // Phase 4: voiceTotalDur → swellEnd:   bedVol → outroVol (swell up)
+          // Phase 4: voiceTotalDur → swellEnd:   bedVol → outroVol (cosine ease)
           // Phase 5: swellEnd → end:             outroVol FLAT (afade fades this)
           const voiceEndStr = voiceTotalDuration.toFixed(3);
-          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*((t-${rampStart})/${rampDuration}),if(lt(t,${voiceEndStr}),${bedV},if(lt(t,${outroSwellEndStr}),${bedV}+(${outV}-${bedV})*((t-${voiceEndStr})/3.0),${outV}))))':eval=frame`;
+          const swellDur = '4.0';
+          const duckEase = cosineEase('t', rampStart, rampDuration.toFixed(3));
+          const swellEase = cosineEase('t', voiceEndStr, swellDur);
+          musicVolumeFilter = `volume='if(lt(t,${rampStart}),${introV},if(lt(t,${rampEnd}),${introV}-(${introV}-${bedV})*${duckEase},if(lt(t,${voiceEndStr}),${bedV},if(lt(t,${outroSwellEndStr}),${bedV}+(${outV}-${bedV})*${swellEase},${outV}))))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE (flat tail, afade fades) ===', {
-            mode: 'envelope_flat_tail',
+          logger.info('=== [STEP 4] MUSIC VOLUME ENVELOPE (cosine ramps, afade fades) ===', {
+            mode: 'envelope_cosine',
             rampStart: `${rampStart}s`,
             rampEnd: `${rampEnd}s`,
             voiceEnd: `${voiceEndStr}s`,
@@ -324,11 +334,13 @@ class FFmpegService {
           const bedV = musicBedVol.toFixed(4);
           const outV = outroVol.toFixed(4);
           const voiceEndStr = voiceTotalDuration.toFixed(3);
-          // No intro ramp — bed → swell → flat (afade fades)
-          musicVolumeFilter = `volume='if(lt(t,${voiceEndStr}),${bedV},if(lt(t,${outroSwellEndStr}),${bedV}+(${outV}-${bedV})*((t-${voiceEndStr})/3.0),${outV}))':eval=frame`;
+          const swellDur = '4.0';
+          const swellEase = cosineEase('t', voiceEndStr, swellDur);
+          // No intro ramp — bed → cosine swell → flat (afade fades)
+          musicVolumeFilter = `volume='if(lt(t,${voiceEndStr}),${bedV},if(lt(t,${outroSwellEndStr}),${bedV}+(${outV}-${bedV})*${swellEase},${outV}))':eval=frame`;
 
-          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed → swell → flat for afade) ===', {
-            mode: 'flat_tail',
+          logger.info('=== [STEP 4] MUSIC VOLUME (flat bed → cosine swell → flat for afade) ===', {
+            mode: 'cosine_swell',
             musicBed: bedV,
             musicOutro: outV,
             swellEnd: `${outroSwellEndStr}s`,
@@ -922,8 +934,8 @@ class FFmpegService {
       return this.processAudio({ filePath: inputPath }, outputPath, 'mp3');
     }
 
-    // Ramp duration at each boundary (smooth gradual transition)
-    const RAMP = 0.5;
+    // Ramp duration at each boundary (smooth cosine ease-in-out transition)
+    const RAMP = 1.5;
     const volumeExpr = this.buildSmoothVolumeExpression(segments, totalDuration, RAMP);
 
     return new Promise((resolve, reject) => {
@@ -971,12 +983,13 @@ class FFmpegService {
       const start = seg.start;
       const end = seg.end;
 
-      // Ramp in: [start, start+ramp] from prevMult to seg.mult (only if segment long enough and mult differs)
+      // Ramp in: [start, start+ramp] from prevMult to seg.mult
+      // Uses cosine ease-in-out: 0.5 - 0.5*cos(PI*(t-a)/d) for smooth S-curve
       const rampInEnd = Math.min(start + rampSec, end - rampSec * 0.5);
       if (rampInEnd > start && prevMult !== seg.mult) {
         const a = start;
         const b = rampInEnd;
-        const val = `${prevMult}+(${seg.mult}-${prevMult})*((t-${a})/${rampSec})`;
+        const val = `${prevMult}+(${seg.mult}-${prevMult})*(0.5-0.5*cos(PI*(t-${a})/${rampSec}))`;
         terms.push(`if(between(t,${a},${b}),${val},`);
       }
 
@@ -987,11 +1000,11 @@ class FFmpegService {
         terms.push(`if(between(t,${midStart},${midEnd}),${seg.mult},`);
       }
 
-      // Ramp out: [end-ramp, end] from seg.mult to nextMult
+      // Ramp out: [end-ramp, end] from seg.mult to nextMult (cosine ease)
       const rampOutStart = Math.max(midEnd, end - rampSec);
       if (end > rampOutStart && seg.mult !== nextMult) {
         const a = rampOutStart;
-        const val = `${seg.mult}+(${nextMult}-${seg.mult})*((t-${a})/${rampSec})`;
+        const val = `${seg.mult}+(${nextMult}-${seg.mult})*(0.5-0.5*cos(PI*(t-${a})/${rampSec}))`;
         terms.push(`if(between(t,${a},${end}),${val},`);
       } else if (end > rampOutStart) {
         terms.push(`if(between(t,${rampOutStart},${end}),${seg.mult},`);
