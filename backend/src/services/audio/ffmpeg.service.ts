@@ -237,6 +237,25 @@ class FFmpegService {
 
         // ── Voice chain ──────────────────────────────────────────────
         // normalize → set volume → fade-in → fade-out → delay
+        // ── Vocal processing chain ──────────────────────────────────
+        // Applied to TTS speech BEFORE mixing with music.
+        // 1. highpass: remove rumble / plosive energy below 80 Hz
+        // 2. EQ 120 Hz cut: reduce muddiness in low-mids
+        // 3. EQ 3.5 kHz boost: add presence & clarity for intelligibility
+        // 4. compressor: even out TTS dynamics (threshold -18 dB, 3:1)
+        // 5. stereotools: very subtle stereo width (mlev=0.02)
+        // 6. aecho: hint of room ambience so voice doesn't sound "flat"
+        // 7. loudnorm: EBU R128 normalization (-16 LUFS, -1.5 TP)
+        const vocalProcessing = [
+          'highpass=f=80',
+          'equalizer=f=120:w=200:g=-3',
+          'equalizer=f=3500:w=2000:g=3',
+          'acompressor=threshold=-18dB:ratio=3:attack=5:release=80:makeup=3',
+          'stereotools=mlev=0.02',
+          'aecho=0.8:0.9:25:0.15',
+          'loudnorm=I=-16:TP=-1.5:LRA=7',
+        ].join(',');
+
         // Fade-in (0.5s qsin): voice emerges smoothly from the music.
         // Fade-out (0.3s qsin): just enough to prevent a hard clip at
         // the end of voice — not long enough to eat into the last words.
@@ -246,11 +265,12 @@ class FFmpegService {
         const voiceFadeIn = `afade=t=in:st=0:d=${voiceEntryFade}:curve=qsin`;
         const voiceFadeOut = `afade=t=out:st=${voiceExitStart.toFixed(3)}:d=${voiceExitFade}:curve=qsin`;
         const voiceBase = voiceDelaySec > 0
-          ? `[0:a]${normalizeSync},volume=${voiceVol},${voiceFadeIn},${voiceFadeOut},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
-          : `[0:a]${normalizeSync},volume=${voiceVol},${voiceFadeIn},${voiceFadeOut}`;
+          ? `[0:a]${normalizeSync},${vocalProcessing},volume=${voiceVol},${voiceFadeIn},${voiceFadeOut},adelay=${Math.round(voiceDelaySec * 1000)}|${Math.round(voiceDelaySec * 1000)}`
+          : `[0:a]${normalizeSync},${vocalProcessing},volume=${voiceVol},${voiceFadeIn},${voiceFadeOut}`;
 
         logger.info('=== [STEP 5] VOICE CHAIN ===', {
           voiceVolume: voiceVol,
+          vocalProcessing: 'highpass→EQ→compressor→stereo→echo→loudnorm',
           voiceEntryFade: `${voiceEntryFade}s (qsin)`,
           voiceExitFade: `${voiceExitFade}s (qsin, starts at ${voiceExitStart.toFixed(3)}s)`,
           voiceDelay: voiceDelaySec > 0 ? `${voiceDelaySec.toFixed(2)}s (${Math.round(voiceDelaySec * 1000)}ms)` : 'none',
